@@ -54,7 +54,6 @@ def run_single(rank, world_size, host = None, args = None, nic = None):
             rank=rank,
             world_size=world_size,
             rpc_backend_options=options
-
         )
         run_ps([(f"client{r}", r, world_size) for r in range(1, world_size)], args)
     # block until all rpc finish

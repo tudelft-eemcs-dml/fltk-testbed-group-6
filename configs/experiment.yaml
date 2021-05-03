@@ -6,7 +6,7 @@ wait_for_clients: true
 net: Cifar10CNN
 dataset: cifar10
 # Use cuda is available; setting to false will force CPU
-cuda: true
+cuda: false
 experiment_prefix: 'experiment_sample'
 output_location: 'output'
 tensor_board_active: true
