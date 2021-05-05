@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 class Model(nn.Module):
@@ -31,11 +32,11 @@ class Trainer(object):
 
 class Master(object):
 
-    def __init__(self, rule, type='no', device_num=20, compromised=5):
+    def __init__(self, rule, attack_type='no', device_num=20, compromised=5):
         self.model = Model()
         self.rule = rule
-        self.type = type
-        self.devices = [Trainer()] * device_num
+        self.attack_type = attack_type
+        self.devices = [Trainer() for _ in range(device_num)]
         self.device_num = device_num
         self.compromised = compromised
         self.states = []
@@ -55,9 +56,9 @@ class Master(object):
         self.update()
 
     def attack(self):
-        if self.type == 'flip':
+        if self.attack_type == 'flip':
             return
-        if self.type == 'no':
+        if self.attack_type == 'no':
             return
         i = 0
         for v in self.model.state_dict().values():
@@ -68,13 +69,68 @@ class Master(object):
                     self.states[i][k][j] = result[k]
             i += 1
 
-    def _attack(self, x, original):
-        return x
+    def _attack(self, params, original):
+        res = params
+        if self.attack_type == 'partial':
+            res = self.poisoning(params, original, False)
+        if self.attack_type == 'full':
+            res = self.poisoning(params, original, True)
+        if self.attack_type == 'gaussian':
+            res = self.gaussian(params)
+        return res
 
-    def _poisoning(self, full):
-        pass
+    def gaussian(self, params):
+        params = torch.Tensor(params)
+        wmean = torch.mean(params)
+        std = torch.std(params)
+        for i in range(self.compromised):
+            params[i] = np.random.normal(wmean, std)
+        return params
+
+    @staticmethod
+    def trimmed(params, trim):
+        if torch.is_tensor(params):
+            params, _ = torch.sort(params)
+        else:
+            params = sorted(params)
+        params = params[trim:-trim]
+        res = sum(params) / len(params)
+        return float(res)
+
+    def poisoning(self, params, original, full):
+        params = torch.Tensor(params)
+        if self.rule == 'trimmed':
+            if full:
+                res = self.trimmed(params, self.compromised)
+                wmax = torch.max(params[self.compromised:])
+                wmin = torch.min(params[self.compromised:])
+                if res > original:
+                    for i in range(self.compromised):
+                        if wmin <= 0:
+                            params[i] = np.random.uniform(2 * wmin, wmin)
+                        else:
+                            params[i] = np.random.uniform(wmin / 2, wmin)
+                else:
+                    for i in range(self.compromised):
+                        if wmax >= 0:
+                            params[i] = np.random.uniform(wmax, 2 * wmax)
+                        else:
+                            params[i] = np.random.uniform(wmax / 2, wmax)
+                return params
+            else:
+                wmean = torch.mean(params[:self.compromised])
+                std = torch.std(params[:self.compromised])
+                if wmean > original:
+                    for i in range(self.compromised):
+                        params[i] = np.random.uniform(wmean - 4 * std, wmean - 3 * std)
+                else:
+                    for i in range(self.compromised):
+                        params[i] = np.random.uniform(wmean + 3 * std, wmean + 4 * std)
+                return params
 
     def aggregate(self, params):
+        if self.rule == 'trimmed':
+            return self.trimmed(params, self.compromised)
         return params[0]
 
     def update(self):
@@ -85,6 +141,7 @@ class Master(object):
             for j in range(t.shape[0]):
                 t[j] = self.aggregate([self.states[i][p][j] for p in range(self.device_num)])
             d[k] = t.reshape_as(v)
+            d[k].requires_grad = v.requires_grad
             i += 1
         self.model.load_state_dict(d)
         print(self.states[0][0])
