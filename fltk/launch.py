@@ -63,9 +63,10 @@ def run_single(rank, world_size, host = None, args = None, nic = None):
 def run_spawn(config):
     world_size = config.world_size
     master_address = config.federator_host
+    nic = config.nic
     mp.spawn(
         run_single,
-        args=(world_size, master_address, config),
+        args=(world_size, master_address, config, nic),
         nprocs=world_size,
         join=True
     )
