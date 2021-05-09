@@ -99,7 +99,7 @@ class Master(object):
 
     def poisoning(self, params, original, full):
         params = torch.Tensor(params)
-        if self.rule == 'trimmed':
+        if self.rule == 'trimmed' or self.rule == 'medium':
             if full:
                 res = self.trimmed(params, self.compromised)
                 wmax = torch.max(params[self.compromised:])
@@ -131,6 +131,8 @@ class Master(object):
     def aggregate(self, params):
         if self.rule == 'trimmed':
             return self.trimmed(params, self.compromised)
+        if self.rule == 'medium':
+            return self.trimmed(params, (params - 1) // 2)
         return params[0]
 
     def update(self):

@@ -115,10 +115,6 @@ class Client:
         self.net = net
         self.net.to(self.device)
 
-    def load_model_from_file(self, model_file_path):
-        model_class = self.args.get_net()
-        default_model_path = os.path.join(self.args.get_default_model_folder_path(), model_class.__name__ + ".model")
-        return self.load_model_from_file(default_model_path)
 
     def get_nn_parameters(self):
         """
@@ -255,6 +251,9 @@ class Client:
         return accuracy, loss, class_precision, class_recall
 
     def run_epochs(self, num_epoch):
+
+        accuracy, test_loss, class_precision, class_recall = self.test()
+
         start_time_train = datetime.datetime.now()
         loss = weights = None
         for e in range(num_epoch):
