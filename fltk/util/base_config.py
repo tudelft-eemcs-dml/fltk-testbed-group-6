@@ -79,6 +79,10 @@ class BareConfig:
         self.default_model_folder_path = "default_models"
         self.data_path = "data"
 
+        self.attack_type = 'no'
+        self.compromised_num = 0
+        self.aggregation_rule = 'trimmed'
+
 
     ###########
     # Methods #
@@ -131,6 +135,13 @@ class BareConfig:
                 self.cuda = True
             else:
                 self.cuda = False
+        if 'attack' in cfg:
+            if 'compromised_num' in cfg['attack']:
+                self.compromised_num = cfg['attack']['compromised_num']
+            if 'attack_type' in cfg['attack']:
+                self.attack_type = cfg['attack']['attack_type']
+            if 'aggregation_rule' in cfg['attack']:
+                self.aggregation_rule = cfg['attack']['aggregation_rule']
 
 
     def init_logger(self, logger):

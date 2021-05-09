@@ -88,10 +88,12 @@ class Federator:
         self.config.init_logger(logging)
 
         self.model = self.load_default_model()
-        self.rule = 'trimmed'
-        self.attack_type = 'full'
-        self.compromised = 2
+        self.rule = config.aggregation_rule
+        self.attack_type = config.attack_type
+        self.compromised = config.compromised_num
         self.device_num = self.config.world_size - 1
+        if self.attack_type == 'no':
+            self.compromised = 0
 
         self.states = []
 

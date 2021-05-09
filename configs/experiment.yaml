@@ -1,6 +1,6 @@
 ---
 # Experiment configuration
-total_epochs: 5
+total_epochs: 20
 epochs_per_cycle: 1
 wait_for_clients: true
 net: FashionMNISTCNN
@@ -10,10 +10,14 @@ cuda: false
 experiment_prefix: 'experiment_sample'
 output_location: 'output'
 tensor_board_active: true
-clients_per_round: 5
+clients_per_round: 20
 system:
   federator:
     hostname: '192.168.1.11'
     nic: 'wifi2'
   clients:
-    amount: 5
+    amount: 20
+attack:
+  compromised_num: 6
+  attack_type: 'no'
+  aggregation_rule: 'trimmed'
