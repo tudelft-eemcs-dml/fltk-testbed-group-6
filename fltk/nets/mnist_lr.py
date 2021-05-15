@@ -12,21 +12,13 @@ class LRModel(nn.Module):
         self.n_classes = n_classes
         self.input_dim = input_dim
         self.linear = nn.Linear(self.input_dim, self.n_classes)
-        self.sigmoid = nn.Sigmoid()
 
-        # print('weights: ', self.linear.weight)
-        # print('bias:', self.linear.bias)
+    def forward(self, data):
+        batch_size = data.shape[0]
+        data = data.view(batch_size, -1)
+        pred = self.linear(data)
+        return pred
 
-    def forward(self, data, label):
-        h = self.linear(data)
-        pred = self.sigmoid(h)
-        _, pred_label = torch.max(pred, 1)
-        incorrect = (pred_label != label).sum()
-        total = label.shape[0]
-        er = incorrect.item() / total
-        ce_loss = F.cross_entropy(pred, label)
-
-        return incorrect, er, ce_loss
 
 
 def training(lr_model, train_loader, epoch=1, iteration=500, cuda=False, learning_rate=1e-3, log_interval=50):

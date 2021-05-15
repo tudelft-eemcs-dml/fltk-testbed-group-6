@@ -1,8 +1,8 @@
 import torch
 import json
 
-from fltk.datasets.distributed import DistCIFAR10Dataset, DistCIFAR100Dataset, DistFashionMNISTDataset
-from fltk.nets import Cifar10CNN, FashionMNISTCNN, Cifar100ResNet, FashionMNISTResNet, Cifar10ResNet, Cifar100VGG
+from fltk.datasets.distributed import DistCIFAR10Dataset, DistCIFAR100Dataset, DistFashionMNISTDataset, DistMNISTDataset
+from fltk.nets import Cifar10CNN, FashionMNISTCNN, Cifar100ResNet, FashionMNISTResNet, Cifar10ResNet, Cifar100VGG, LRModel
 
 SEED = 1
 torch.manual_seed(SEED)
@@ -52,8 +52,8 @@ class BareConfig:
             "Cifar10CNN": Cifar10CNN,
             "Cifar10ResNet": Cifar10ResNet,
             "FashionMNISTCNN": FashionMNISTCNN,
-            "FashionMNISTResNet": FashionMNISTResNet
-
+            "FashionMNISTResNet": FashionMNISTResNet,
+            "MNISTLR": LRModel
         }
         self.net = None
         self.set_net_by_name('Cifar10CNN')
@@ -63,17 +63,20 @@ class BareConfig:
             'cifar10': DistCIFAR10Dataset,
             'cifar100': DistCIFAR100Dataset,
             'fashion-mnist': DistFashionMNISTDataset,
+            'mnist': DistMNISTDataset
         }
         self.train_data_loader_pickle_path = {
             'cifar10': 'data_loaders/cifar10/train_data_loader.pickle',
             'fashion-mnist': 'data_loaders/fashion-mnist/train_data_loader.pickle',
             'cifar100': 'data_loaders/cifar100/train_data_loader.pickle',
+            'mnist': 'data_loaders/mnist/train_data_loader.pickle',
         }
 
         self.test_data_loader_pickle_path = {
             'cifar10': 'data_loaders/cifar10/test_data_loader.pickle',
             'fashion-mnist': 'data_loaders/fashion-mnist/test_data_loader.pickle',
             'cifar100': 'data_loaders/cifar100/test_data_loader.pickle',
+            'mnist': 'data_loaders/mnist/test_data_loader.pickle',
         }
         self.loss_function = torch.nn.CrossEntropyLoss
         self.default_model_folder_path = "default_models"

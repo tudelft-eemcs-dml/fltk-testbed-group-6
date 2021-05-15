@@ -1,12 +1,12 @@
 ---
 # Experiment configuration
-total_epochs: 20
+total_epochs: 30
 epochs_per_cycle: 1
 wait_for_clients: true
-net: FashionMNISTCNN
-dataset: fashion-mnist
+net: MNISTLR
+dataset: mnist
 # Use cuda is available; setting to false will force CPU
-cuda: false
+cuda: true
 experiment_prefix: 'experiment_sample'
 output_location: 'output'
 tensor_board_active: true
@@ -19,5 +19,5 @@ system:
     amount: 20
 attack:
   compromised_num: 6
-  attack_type: 'no'
+  attack_type: 'full'
   aggregation_rule: 'trimmed'
