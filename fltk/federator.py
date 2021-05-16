@@ -25,7 +25,6 @@ import logging
 
 from fltk.util.results import EpochData
 from fltk.util.tensor_converter import convert_distributed_data_into_numpy
-from math import sqrt
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -76,7 +75,7 @@ class Federator:
     epoch_counter = 0
     client_data = {}
 
-    def __init__(self, client_id_triple, num_epochs=3, config=None, attacking_rule='trimmed', attack_type='full', compromised=2):
+    def __init__(self, client_id_triple, num_epochs = 3, config=None):
         log_rref = rpc.RRef(FLLogger())
         self.log_rref = log_rref
         self.num_epoch = num_epochs
@@ -89,13 +88,12 @@ class Federator:
         self.config.init_logger(logging)
 
         self.model = self.load_default_model()
-        self.rule = attacking_rule
-        if self.rule == 'krum':
-            self.searching_lambda = False
-            self.lambda_threshold = 1e-5
-        self.attack_type = attack_type
-        self.compromised = compromised
+        self.rule = config.aggregation_rule
+        self.attack_type = config.attack_type
+        self.compromised = config.compromised_num
         self.device_num = self.config.world_size - 1
+        if self.attack_type == 'no':
+            self.compromised = 0
 
         self.states = []
 
@@ -106,7 +104,7 @@ class Federator:
             self.clients.append(ClientRef(id, client, tensorboard_writer=writer))
             self.client_data[id] = []
 
-    def select_clients(self, n=2):
+    def select_clients(self, n = 2):
         return random_selection(self.clients, n)
 
     def ping_all(self):
@@ -196,39 +194,16 @@ class Federator:
     def attack(self):
         if self.attack_type == 'flip':
             return
-        elif self.attack_type == 'no':
+        if self.attack_type == 'no':
             return
-
-        if self.rule == 'trimmed':
-            i = 0
-            for v in self.model.state_dict().values():
-                v = v.flatten()
-                for j in range(len(self.states[i][0])):
-                    result = self._attack([self.states[i][k][j] for k in range(self.device_num)], v[j])
-                    for k in range(len(result)):
-                        self.states[i][k][j] = result[k]
-                i += 1
-        elif self.rule == 'krum':
-            # for now only works in minst_lr
-            self.flatten_states = []
-            for params in self.states:
-                weight = params['linear.weight'].flatten()
-                bias = params['linear.bias']
-                flatten_params = torch.cat((weight, bias))
-                self.flatten_states.append(flatten_params)
-
-            weight = self.model.state_dict()['linear.weight'].flatten()
-            bias = self.model.state_dict()['linear.bias']
-            self.flatten_global = torch.cat((weight, bias))
-
-            self.compromised_states = []
-            for i in range(len(self.flatten_states)):
-                flatten_param = self.flatten_global[i]
-                if i <= self.compromised - 1:
-                    result = self._attack(flatten_param, self.flatten_global)
-                else:
-                    result = self.flatten_states[i]
-                self.compromised_states.append(result)
+        i = 0
+        for v in self.model.state_dict().values():
+            v = v.flatten()
+            for j in range(len(self.states[i][0])):
+                result = self._attack([self.states[i][k][j] for k in range(self.device_num)], v[j])
+                for k in range(len(result)):
+                    self.states[i][k][j] = result[k]
+            i += 1
 
     def _attack(self, params, original):
         res = params
@@ -258,82 +233,6 @@ class Federator:
             params = params[trim:-trim]
         res = sum(params) / len(params)
         return float(res)
-
-    def krum(self, compromised_states):
-        """
-        select the local model with the smallest sum of distance as global model
-        :param compromised_states: all states containing (assumed) compromised states
-        :return: selected model
-        """
-
-        n = self.device_num - self.compromised - 2
-        if n < 0:
-            logging.warning('Too many compromised workers, c should be < (m-2)/2')
-            n = 0
-
-        records = {}
-        for i in range(len(compromised_states)):
-            state = compromised_states[i]
-            dists = []
-            for another_state in compromised_states:
-                if state == another_state: continue
-                euclidean_dist = torch.sum(((state - another_state) ** 2))
-                dists.append(euclidean_dist)
-            sorted_dists = sorted(dists)
-            records[i] = sum(sorted_dists[:n])
-        self.sorted_records = dict(sorted(records.items(), key=lambda item: item[1]))  # also used for calculating epsilon
-        index = next(iter(self.sorted_records))
-
-        return index, compromised_states[index]
-
-    def krum_changing_direction(self, states):
-        _, global_model = self.krum(states)
-        previous_global = self.flatten_global
-        s = torch.where(global_model > previous_global, 1, -1)
-        return s
-
-    def krum_lambda(self):
-        d = self.flatten_global.shape[0]
-        lambda_ = 1/((self.device_num - 2*self.compromised - 1)*sqrt(d))
-
-        n = self.device_num - self.compromised - 2
-        if n < 0:
-            logging.warning('Too many compromised workers, c should be < (m-2)/2')
-            n = 0
-
-        benign_dists = dict()
-        for i in range(self.compromised, len(self.flatten_states)):
-            benign_dists[i] = []
-            for j in range(self.compromised, len(self.flatten_states)):
-                if i == j:
-                    continue
-                else:
-                    euclidean_dist = torch.sum(((self.flatten_states[i] - self.flatten_states[j]) ** 2))
-                    benign_dists[i].append(euclidean_dist)
-        dists_sum_list = []
-        for k, l in benign_dists:
-            sorted_l = sorted(l)
-            dists_sum_list.append(sum(sorted_l[:n]))
-        smallest_benign_dist = sorted(dists_sum_list)[0]
-        lambda_ *= smallest_benign_dist
-
-        largest_benign_dist = 0.0
-        for i in range(self.compromised, len(self.flatten_states)):
-            for j in range(self.compromised, len(self.flatten_states)):
-                if i == j:
-                    continue
-                else:
-                    euclidean_dist = torch.sum(((self.flatten_states[i] - self.flatten_states[j]) ** 2))
-                    if euclidean_dist > largest_benign_dist:
-                        largest_benign_dist = euclidean_dist
-        lambda_ += 1/sqrt(d) * largest_benign_dist
-
-        return lambda_
-
-    def krum_reverse_flatten_lr(self, params, input_dim=784, n_classes=10):
-        bias = params[-n_classes:]
-        weights = params[:-n_classes].view(n_classes, input_dim)
-        return weights, bias
 
     def poisoning(self, params, original, full):
         params = torch.Tensor(params)
@@ -365,18 +264,6 @@ class Federator:
                     for i in range(self.compromised):
                         params[i] = np.random.uniform(wmean + 3 * std, wmean + 4 * std)
                 return params
-        elif self.rule == 'krum':
-            if full:
-                # 1. w_1' = w_Re - lambda * s
-                # 2. the other c-1 to be more close to w_1', distance at most epsilon (incomplete)
-                s = self.krum_changing_direction(self.flatten_states)
-                w_Re = self.flatten_global
-                self.lambda_ = self.krum_lambda()
-                if self.searching_lambda:
-                    self.lambda_ *= 1/2
-                compromised_w_1 = w_Re - self.lambda_ * s
-                return compromised_w_1
-
 
     def aggregate(self, params):
         if self.rule == 'trimmed':
@@ -386,35 +273,16 @@ class Federator:
         return params[0]
 
     def update(self):
-        if self.rule == 'trimmed':
-            d = {}
-            i = 0
-            for k, v in self.model.state_dict().items():
-                t = torch.zeros_like(self.states[i][0])
-                for j in range(t.shape[0]):
-                    t[j] = self.aggregate([self.states[i][p][j] for p in range(self.device_num)])
-                d[k] = t.reshape_as(v)
-                d[k].requires_grad = v.requires_grad
-                i += 1
-        elif self.rule == 'krum':
-            d = {}
-            index, flatten_params = self.krum(self.compromised_states)
-            if index == 1 or self.lambda_ < self.lambda_threshold:  # stop binary searching of lambda
-                self.searching_lambda = False
-            else:
-                self.searching_lambda = True
-            d['linear.weight'], d['linear.bias'] = self.krum_reverse_flatten_lr(flatten_params)
-
+        d = {}
+        i = 0
+        for k, v in self.model.state_dict().items():
+            t = torch.zeros_like(self.states[i][0])
+            for j in range(t.shape[0]):
+                t[j] = self.aggregate([self.states[i][p][j] for p in range(self.device_num)])
+            d[k] = t.reshape_as(v)
+            d[k].requires_grad = v.requires_grad
+            i += 1
         self.model.load_state_dict(d)
-
-    def test_global_model(self):
-        """
-        Test global model
-
-        :return:
-        """
-        # self.dataset = self.args.DistDatasets[self.args.dataset_name](self.args)
-        logging.info(f'rank: {self.args.get_rank()}')  # group 0 should have mixed classes
 
     def remote_run_epoch(self, epochs):
         responses = []
@@ -438,8 +306,11 @@ class Federator:
                                         self.epoch_counter * res[0].data_size)
 
             client_weights.append(weights)
-        # updated_model = self.step(client_weights)
-        updated_model = average_nn_parameters(client_weights)
+        updated_model = self.step(client_weights)
+
+        self.update_local(updated_model)
+
+    def update_local(self, updated_model):
 
         responses = []
         for client in self.clients:
@@ -489,6 +360,7 @@ class Federator:
         self.client_load_data()
         self.ping_all()
         self.clients_ready()
+        self.update_local(self.model.state_dict())
         self.update_client_data_sizes()
 
         epoch_to_run = self.num_epoch
@@ -496,7 +368,6 @@ class Federator:
         epoch_to_run = self.config.epochs
         epoch_size = self.config.epochs_per_cycle
         for epoch in range(epoch_to_run):
-            self.test_global_model()
             print(f'Running epoch {epoch}')
             self.remote_run_epoch(epoch_size)
             addition += 1

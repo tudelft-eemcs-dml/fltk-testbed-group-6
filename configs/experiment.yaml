@@ -1,27 +1,23 @@
 ---
 # Experiment configuration
-total_epochs: 5
+total_epochs: 30
 epochs_per_cycle: 1
 wait_for_clients: true
 net: MNISTLR
 dataset: mnist
 # Use cuda is available; setting to false will force CPU
-cuda: false
+cuda: true
 experiment_prefix: 'experiment_sample'
 output_location: 'output'
 tensor_board_active: true
-clients_per_round: 5
-sampler: "p degree"
-sampler_args:
-  - 0.5     # p degree
-  - 42    # random seed
+clients_per_round: 20
 system:
   federator:
-    hostname: '192.168.1.102'
-    nic: 'en0'
+    hostname: '192.168.1.11'
+    nic: 'wifi2'
   clients:
-    amount: 5
+    amount: 20
 attack:
-  compromised_num: 2
+  compromised_num: 6
   attack_type: 'full'
-  aggregation_rule: 'krum'
+  aggregation_rule: 'trimmed'
