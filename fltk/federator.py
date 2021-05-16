@@ -308,6 +308,10 @@ class Federator:
             client_weights.append(weights)
         updated_model = self.step(client_weights)
 
+        self.update_local(updated_model)
+
+    def update_local(self, updated_model):
+
         responses = []
         for client in self.clients:
             responses.append(
@@ -356,6 +360,7 @@ class Federator:
         self.client_load_data()
         self.ping_all()
         self.clients_ready()
+        self.update_local(self.model.state_dict())
         self.update_client_data_sizes()
 
         epoch_to_run = self.num_epoch
