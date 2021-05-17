@@ -253,6 +253,7 @@ class Federator:
 
             self.compromised_states = []
             self.first_compromised_model = self._attack(None, None)
+            self.compromised_states.append(self.first_compromised_model)
             for i in range(1, len(self.flatten_states)):
                 if i <= self.compromised - 1:
                     result = self.first_compromised_model  # would be changed later
@@ -312,6 +313,9 @@ class Federator:
             sorted_dists = sorted(dists)
             records[i] = sum(sorted_dists[:n])
         self.sorted_records = dict(sorted(records.items(), key=lambda item: item[1]))  # also used for calculating epsilon
+
+        logging.info(f'sorted: {self.sorted_records}')
+
         index = next(iter(self.sorted_records))
         logging.info('Model selected by Krum: ' + str(index+1))
 
@@ -437,6 +441,7 @@ class Federator:
                 w_Re = self.flatten_global
                 if not self.begin_searching_lambda:
                     self.lambda_ = self.krum_lambda()
+                    self.begin_searching_lambda = True
                 compromised_w_1 = w_Re - self.lambda_ * s
                 return compromised_w_1
             else:
@@ -444,6 +449,7 @@ class Federator:
                 w_Re = self.flatten_global
                 if not self.begin_searching_lambda:
                     self.lambda_ = self.krum_lambda()
+                    self.begin_searching_lambda = True
                 compromised_w_1 = w_Re - self.lambda_ * s
                 return compromised_w_1
 
@@ -478,7 +484,7 @@ class Federator:
                         current_compromised_states = []
                         for i in range(self.compromised):
                             current_compromised_states.append(new_compromised_w_1)
-                        for i in range(self.compromised, self.device_num):
+                        for i in range(self.compromised+1, self.device_num):
                             current_compromised_states.append(self.compromised_states[i])
                         index, flatten_params = self.krum(current_compromised_states)
             elif self.attack_type == 'partial':
