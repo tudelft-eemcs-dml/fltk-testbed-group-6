@@ -96,10 +96,11 @@ class Federator:
         self.attack_type = config.attack_type
         self.compromised = config.compromised_num
         if self.rule == 'krum':
-            self.searching_lambda = False
             self.lambda_threshold = 1e-5
+            self.first_compromised_model = None
+            self.begin_searching_lambda = False
         self.device_num = self.config.world_size - 1
-        logging.info(self.rule)
+        logging.info(f'Attacking rule: {self.rule}')
         self.states = []
         self._epoch = 0
 
@@ -204,13 +205,16 @@ class Federator:
 
     def step(self, client_weights):
         self.states = []
-        for i in range(self.device_num):
-            self.states.append([])
-            for param in client_weights[i].values():
-                self.states[i].append(param.flatten())
-        self.states = list(zip(*self.states))
-        for i in range(len(self.states)):
-            self.states[i] = torch.stack(self.states[i])
+        if self.rule == 'trimmed':
+            for i in range(self.device_num):
+                self.states.append([])
+                for param in client_weights[i].values():
+                    self.states[i].append(param.flatten())
+            self.states = list(zip(*self.states))
+            for i in range(len(self.states)):
+                self.states[i] = torch.stack(self.states[i])
+        elif self.rule == 'krum':
+            self.states = client_weights
         logging.info(f"round {self._epoch} state saved")
         self.attack()
         logging.info(f"round {self._epoch} attack finished")
@@ -248,10 +252,10 @@ class Federator:
             self.flatten_global = torch.cat((weight, bias))
 
             self.compromised_states = []
-            for i in range(len(self.flatten_states)):
-                flatten_param = self.flatten_global[i]
+            self.first_compromised_model = self._attack(None, None)
+            for i in range(1, len(self.flatten_states)):
                 if i <= self.compromised - 1:
-                    result = self._attack(flatten_param, self.flatten_global)
+                    result = self.first_compromised_model  # would be changed later
                 else:
                     result = self.flatten_states[i]
                 self.compromised_states.append(result)
@@ -288,7 +292,7 @@ class Federator:
     def krum(self, compromised_states):
         """
         select the local model with the smallest sum of distance as global model
-        :param compromised_states: all states containing (assumed) compromised states
+        :param compromised_states: states containing compromised states (variable length)
         :return: selected model
         """
 
@@ -302,15 +306,16 @@ class Federator:
             state = compromised_states[i]
             dists = []
             for another_state in compromised_states:
-                if state == another_state: continue
+                if torch.all(state.eq(another_state)): continue
                 euclidean_dist = torch.sum(((state - another_state) ** 2))
                 dists.append(euclidean_dist)
             sorted_dists = sorted(dists)
             records[i] = sum(sorted_dists[:n])
         self.sorted_records = dict(sorted(records.items(), key=lambda item: item[1]))  # also used for calculating epsilon
         index = next(iter(self.sorted_records))
+        logging.info('Model selected by Krum: ' + str(index+1))
 
-        return index, compromised_states[index]
+        return index+1, compromised_states[index]
 
     def krum_changing_direction(self, states):
         _, global_model = self.krum(states)
@@ -319,40 +324,73 @@ class Federator:
         return s
 
     def krum_lambda(self):
+        '''
+        calculate the initial value of lambda, only do this at the beginning of each iteration
+        :return:
+        '''
+
         d = self.flatten_global.shape[0]
         lambda_ = 1/((self.device_num - 2*self.compromised - 1)*sqrt(d))
 
         n = self.device_num - self.compromised - 2
         if n < 0:
             logging.warning('Too many compromised workers, c should be < (m-2)/2')
-            n = 0
+            n = 1
 
-        benign_dists = dict()
-        for i in range(self.compromised, len(self.flatten_states)):
-            benign_dists[i] = []
-            for j in range(self.compromised, len(self.flatten_states)):
-                if i == j:
-                    continue
-                else:
-                    euclidean_dist = torch.sum(((self.flatten_states[i] - self.flatten_states[j]) ** 2))
-                    benign_dists[i].append(euclidean_dist)
-        dists_sum_list = []
-        for k, l in benign_dists:
-            sorted_l = sorted(l)
-            dists_sum_list.append(sum(sorted_l[:n]))
-        smallest_benign_dist = sorted(dists_sum_list)[0]
-        lambda_ *= smallest_benign_dist
+        if self.attack_type == 'full':
+            benign_dists = dict()
+            for i in range(self.compromised, len(self.flatten_states)):
+                benign_dists[i] = []
+                for j in range(self.compromised, len(self.flatten_states)):
+                    if i == j:
+                        continue
+                    else:
+                        euclidean_dist = torch.sum(((self.flatten_states[i] - self.flatten_states[j]) ** 2))
+                        benign_dists[i].append(euclidean_dist)
+            dists_sum_list = []
+            for k, l in benign_dists.items():
+                sorted_l = sorted(l)
+                dists_sum_list.append(sum(sorted_l[:n]))
+            smallest_benign_dist = sorted(dists_sum_list)[0]
+            lambda_ *= smallest_benign_dist
 
-        largest_benign_dist = 0.0
-        for i in range(self.compromised, len(self.flatten_states)):
-            for j in range(self.compromised, len(self.flatten_states)):
-                if i == j:
-                    continue
-                else:
-                    euclidean_dist = torch.sum(((self.flatten_states[i] - self.flatten_states[j]) ** 2))
-                    if euclidean_dist > largest_benign_dist:
-                        largest_benign_dist = euclidean_dist
-        lambda_ += 1/sqrt(d) * largest_benign_dist
+            largest_benign_dist = 0.0
+            for i in range(self.compromised, len(self.flatten_states)):
+                for j in range(self.compromised, len(self.flatten_states)):
+                    if i == j:
+                        continue
+                    else:
+                        euclidean_dist = torch.sum(((self.flatten_states[i] - self.flatten_states[j]) ** 2))
+                        if euclidean_dist > largest_benign_dist:
+                            largest_benign_dist = euclidean_dist
+            lambda_ += 1/sqrt(d) * largest_benign_dist
+        elif self.attack_type == 'partial':
+            benign_dists = dict()
+            for i in range(0, self.compromised):  # use before-attack compromised models as benign models
+                benign_dists[i] = []
+                for j in range(0, self.compromised):
+                    if i == j:
+                        continue
+                    else:
+                        euclidean_dist = torch.sum(((self.flatten_states[i] - self.flatten_states[j]) ** 2))
+                        benign_dists[i].append(euclidean_dist)
+            dists_sum_list = []
+            for k, l in benign_dists.items():
+                sorted_l = sorted(l)
+                dists_sum_list.append(sum(sorted_l[:n]))
+            smallest_benign_dist = sorted(dists_sum_list)[0]
+            lambda_ *= smallest_benign_dist
+
+            largest_benign_dist = 0.0
+            for i in range(0, self.compromised):
+                for j in range(0, self.compromised):
+                    if i == j:
+                        continue
+                    else:
+                        euclidean_dist = torch.sum(((self.flatten_states[i] - self.flatten_states[j]) ** 2))
+                        if euclidean_dist > largest_benign_dist:
+                            largest_benign_dist = euclidean_dist
+            lambda_ += 1 / sqrt(d) * largest_benign_dist
 
         return lambda_
 
@@ -362,8 +400,8 @@ class Federator:
         return weights, bias
 
     def poisoning(self, params, original, full):
-        params = torch.Tensor(params)
         if self.rule == 'trimmed' or self.rule == 'medium':
+            params = torch.Tensor(params)
             if full:
                 res = self.trimmed(params, self.compromised)
                 wmax = torch.max(params[self.compromised:])
@@ -397,12 +435,17 @@ class Federator:
                 # 2. the other c-1 to be more close to w_1', distance at most epsilon (incomplete)
                 s = self.krum_changing_direction(self.flatten_states)
                 w_Re = self.flatten_global
-                self.lambda_ = self.krum_lambda()
-                if self.searching_lambda:
-                    self.lambda_ *= 1/2
+                if not self.begin_searching_lambda:
+                    self.lambda_ = self.krum_lambda()
                 compromised_w_1 = w_Re - self.lambda_ * s
                 return compromised_w_1
-
+            else:
+                s = self.krum_changing_direction(self.flatten_states[:self.compromised])
+                w_Re = self.flatten_global
+                if not self.begin_searching_lambda:
+                    self.lambda_ = self.krum_lambda()
+                compromised_w_1 = w_Re - self.lambda_ * s
+                return compromised_w_1
 
     def aggregate(self, params):
         if self.rule == 'trimmed':
@@ -424,12 +467,41 @@ class Federator:
                 i += 1
         elif self.rule == 'krum':
             d = {}
-            index, flatten_params = self.krum(self.compromised_states)
-            if index == 1 or self.lambda_ < self.lambda_threshold:  # stop binary searching of lambda
-                self.searching_lambda = False
-            else:
-                self.searching_lambda = True
-            d['linear.weight'], d['linear.bias'] = self.krum_reverse_flatten_lr(flatten_params)
+            if self.attack_type == 'full':
+                index, flatten_params = self.krum(self.compromised_states)
+                while index != 1:
+                    self.lambda_ *= 1/2
+                    if self.lambda_ < self.lambda_threshold:
+                        break
+                    else:
+                        new_compromised_w_1 = self._attack(None, None)
+                        current_compromised_states = []
+                        for i in range(self.compromised):
+                            current_compromised_states.append(new_compromised_w_1)
+                        for i in range(self.compromised, self.device_num):
+                            current_compromised_states.append(self.compromised_states[i])
+                        index, flatten_params = self.krum(current_compromised_states)
+            elif self.attack_type == 'partial':
+                current_compromised_states = [self.first_compromised_model]
+                for i in range(1, self.compromised):
+                    current_compromised_states.append(self.states[i])  # use before attack compromised models as benign models
+                index, flatten_params = self.krum(current_compromised_states)
+                num_compromised_models = 1
+                while index != 1:
+                    self.lambda_ *= 1 / 2
+                    if self.lambda_ < self.lambda_threshold:
+                        num_compromised_models += 1
+                    else:
+                        new_compromised_w_1 = self._attack(None, None)
+                        current_compromised_states = []
+                        for i in range(num_compromised_models):
+                            current_compromised_states.append(new_compromised_w_1)
+                        for i in range(self.compromised):
+                            current_compromised_states.append(self.states[i])
+                        index, flatten_params = self.krum(current_compromised_states)
+
+            new_compromised_w_1 = self._attack(None, None)  # calculated with the solved lambda
+            d['linear.weight'], d['linear.bias'] = self.krum_reverse_flatten_lr(new_compromised_w_1)
 
         self.model.load_state_dict(d)
 
