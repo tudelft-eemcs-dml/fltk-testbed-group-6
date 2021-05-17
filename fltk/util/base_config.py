@@ -1,11 +1,15 @@
 import torch
 import json
 
-from fltk.datasets.distributed import DistCIFAR10Dataset, DistCIFAR100Dataset, DistFashionMNISTDataset, DistMNISTDataset
-from fltk.nets import Cifar10CNN, FashionMNISTCNN, Cifar100ResNet, FashionMNISTResNet, Cifar10ResNet, Cifar100VGG, LRModel
+from fltk.datasets.distributed import DistCIFAR10Dataset, DistCIFAR100Dataset, DistFashionMNISTDataset
+from fltk.nets import Cifar10CNN, FashionMNISTCNN, Cifar100ResNet, FashionMNISTResNet, Cifar10ResNet, Cifar100VGG
+
+from fltk.datasets.non_iid_dataset.non_iid_mnist import NonIIDMNISTDataset
+from fltk.nets.mnist_lr import LRModel
 
 SEED = 1
 torch.manual_seed(SEED)
+
 
 class BareConfig:
 
@@ -44,7 +48,8 @@ class BareConfig:
         self.federator_host = '0.0.0.0'
         self.rank = 0
         self.world_size = 0
-        self.data_sampler = None
+        self.data_sampler = "uniform"
+        self.data_sampler_args = None
         self.distributed = False
         self.available_nets = {
             "Cifar100ResNet": Cifar100ResNet,
@@ -54,6 +59,7 @@ class BareConfig:
             "FashionMNISTCNN": FashionMNISTCNN,
             "FashionMNISTResNet": FashionMNISTResNet,
             "MNISTLR": LRModel
+
         }
         self.net = None
         self.set_net_by_name('Cifar10CNN')
@@ -63,20 +69,18 @@ class BareConfig:
             'cifar10': DistCIFAR10Dataset,
             'cifar100': DistCIFAR100Dataset,
             'fashion-mnist': DistFashionMNISTDataset,
-            'mnist': DistMNISTDataset
+            'mnist': NonIIDMNISTDataset
         }
         self.train_data_loader_pickle_path = {
             'cifar10': 'data_loaders/cifar10/train_data_loader.pickle',
             'fashion-mnist': 'data_loaders/fashion-mnist/train_data_loader.pickle',
             'cifar100': 'data_loaders/cifar100/train_data_loader.pickle',
-            'mnist': 'data_loaders/mnist/train_data_loader.pickle',
         }
 
         self.test_data_loader_pickle_path = {
             'cifar10': 'data_loaders/cifar10/test_data_loader.pickle',
             'fashion-mnist': 'data_loaders/fashion-mnist/test_data_loader.pickle',
             'cifar100': 'data_loaders/cifar100/test_data_loader.pickle',
-            'mnist': 'data_loaders/mnist/test_data_loader.pickle',
         }
         self.loss_function = torch.nn.CrossEntropyLoss
         self.default_model_folder_path = "default_models"
@@ -86,12 +90,11 @@ class BareConfig:
         self.compromised_num = 0
         self.aggregation_rule = 'trimmed'
 
-
     ###########
     # Methods #
     ###########
 
-    def merge_yaml(self, cfg = {}):
+    def merge_yaml(self, cfg={}):
         """
         total_epochs: 20
         epochs_per_cycle: 2
@@ -131,13 +134,17 @@ class BareConfig:
             if 'federator' in cfg['system']:
                 if 'hostname' in cfg['system']['federator']:
                     self.federator_host = cfg['system']['federator']['hostname']
-                if 'nic' in cfg['system']['federator']:
-                    self.nic = cfg['system']['federator']['nic']
         if 'cuda' in cfg:
             if cfg['cuda']:
                 self.cuda = True
             else:
                 self.cuda = False
+
+        if 'sampler' in cfg:
+            self.data_sampler = cfg['sampler']
+        if 'sampler_args' in cfg:
+            self.data_sampler_args = cfg['sampler_args']
+
         if 'attack' in cfg:
             if 'compromised_num' in cfg['attack']:
                 self.compromised_num = cfg['attack']['compromised_num']
@@ -145,7 +152,6 @@ class BareConfig:
                 self.attack_type = cfg['attack']['attack_type']
             if 'aggregation_rule' in cfg['attack']:
                 self.aggregation_rule = cfg['attack']['aggregation_rule']
-
 
     def init_logger(self, logger):
         self.logger = logger
@@ -164,6 +170,9 @@ class BareConfig:
 
     def get_sampler(self):
         return self.data_sampler
+
+    def get_sampler_args(self):
+        return self.data_sampler_args
 
     def get_round_worker_selection_strategy(self):
         return self.round_worker_selection_strategy
@@ -330,8 +339,8 @@ class BareConfig:
                "Model Saving Path (Relative): {}\n".format(self.save_model_path) + \
                "Epoch Save Start Prefix: {}\n".format(self.epoch_save_start_suffix) + \
                "Epoch Save End Suffix: {}\n".format(self.epoch_save_end_suffix) + \
-               "Number of Clients: {}\n".format(self.num_workers) + \
-               "Number of Poisoned Clients: {}\n".format(self.num_poisoned_workers) + \
+               "Number of Clients: {}\n".format(self.world_size-1) + \
+               "Number of Poisoned Clients: {}\n".format(self.compromised_num) + \
                "NN: {}\n".format(self.net) + \
                "Train Data Loader Path: {}\n".format(self.train_data_loader_pickle_path) + \
                "Test Data Loader Path: {}\n".format(self.test_data_loader_pickle_path) + \
