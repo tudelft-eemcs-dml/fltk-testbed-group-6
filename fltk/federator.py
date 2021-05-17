@@ -76,7 +76,7 @@ class Federator:
     epoch_counter = 0
     client_data = {}
 
-    def __init__(self, client_id_triple, num_epochs=3, config=None, attacking_rule='trimmed', attack_type='full', compromised=2):
+    def __init__(self, client_id_triple, num_epochs=3, config=None):
         log_rref = rpc.RRef(FLLogger())
         self.log_rref = log_rref
         self.num_epoch = num_epochs
@@ -89,14 +89,14 @@ class Federator:
         self.config.init_logger(logging)
 
         self.model = self.load_default_model()
-        self.rule = attacking_rule
+        self.rule = config.aggregation_rule
+        self.attack_type = config.attack_type
+        self.compromised = config.compromised_num
         if self.rule == 'krum':
             self.searching_lambda = False
             self.lambda_threshold = 1e-5
-        self.attack_type = attack_type
-        self.compromised = compromised
         self.device_num = self.config.world_size - 1
-
+        logging.info(self.rule)
         self.states = []
 
     def create_clients(self, client_id_triple):
@@ -438,8 +438,10 @@ class Federator:
                                         self.epoch_counter * res[0].data_size)
 
             client_weights.append(weights)
-        # updated_model = self.step(client_weights)
-        updated_model = average_nn_parameters(client_weights)
+        updated_model = self.step(client_weights)
+        self.update_local(updated_model)
+
+    def update_local(self, updated_model):
 
         responses = []
         for client in self.clients:
@@ -489,6 +491,7 @@ class Federator:
         self.client_load_data()
         self.ping_all()
         self.clients_ready()
+        self.update_local(self.model.state_dict())
         self.update_client_data_sizes()
 
         epoch_to_run = self.num_epoch

@@ -175,7 +175,7 @@ class Client:
         :param epoch: Current epoch #
         :type epoch: int
         """
-        # self.net.train()
+        self.net.train()
 
         # save model
         if self.args.should_save_model(epoch):

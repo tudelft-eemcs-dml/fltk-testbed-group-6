@@ -35,7 +35,7 @@ class NonIIDMNISTDataset(DistDataset):
                                         transform=transform)
         self.test_sampler = self.get_sampler(self.test_dataset)
         self.test_loader = DataLoader(self.test_dataset, batch_size=16, sampler=self.test_sampler)
-
+    '''
     def load_train_dataset(self):
         self.get_args().get_logger().debug("Loading CIFAR10 train data")
 
@@ -76,7 +76,7 @@ class NonIIDMNISTDataset(DistDataset):
         self.get_args().get_logger().debug("Finished loading CIFAR10 test data")
 
         return test_data
-
+    '''
     def get_sampler(self, dataset):
         sampler = None
         if self.args.get_distributed():

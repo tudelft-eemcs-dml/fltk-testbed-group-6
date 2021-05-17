@@ -134,6 +134,8 @@ class BareConfig:
             if 'federator' in cfg['system']:
                 if 'hostname' in cfg['system']['federator']:
                     self.federator_host = cfg['system']['federator']['hostname']
+                if 'nic' in cfg['system']['federator']:
+                    self.nic = cfg['system']['federator']['nic']
         if 'cuda' in cfg:
             if cfg['cuda']:
                 self.cuda = True
