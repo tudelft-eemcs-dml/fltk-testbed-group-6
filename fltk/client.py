@@ -103,7 +103,6 @@ class Client:
         self.args.distributed = True
         self.args.rank = self.rank
         self.args.world_size = self.world_size
-        # self.dataset = DistCIFAR10Dataset(self.args)
         self.dataset = self.args.DistDatasets[self.args.dataset_name](self.args)
         self.finished_init = True
         logging.info('Done with init')
@@ -204,7 +203,7 @@ class Client:
                 self.args.get_logger().info('[%d, %5d] loss: %.3f' % (epoch, i, running_loss / self.args.get_log_interval()))
                 final_running_loss = running_loss / self.args.get_log_interval()
                 running_loss = 0.0
-
+            break
         self.scheduler.step()
 
         # save model
@@ -252,7 +251,7 @@ class Client:
 
     def run_epochs(self, num_epoch):
 
-        accuracy, test_loss, class_precision, class_recall = self.test()
+        # accuracy, test_loss, class_precision, class_recall = self.test()
 
         start_time_train = datetime.datetime.now()
         loss = weights = None
@@ -263,11 +262,12 @@ class Client:
         train_time_ms = int(elapsed_time_train.total_seconds()*1000)
 
         start_time_test = datetime.datetime.now()
-        accuracy, test_loss, class_precision, class_recall = self.test()
+        # accuracy, test_loss, class_precision, class_recall = self.test()
         elapsed_time_test = datetime.datetime.now() - start_time_test
         test_time_ms = int(elapsed_time_test.total_seconds()*1000)
 
-        data = EpochData(self.epoch_counter, train_time_ms, test_time_ms, loss, accuracy, test_loss, class_precision, class_recall, client_id=self.id)
+        # data = EpochData(self.epoch_counter, train_time_ms, test_time_ms, loss, accuracy, test_loss, class_precision, class_recall, client_id=self.id)
+        data = EpochData(self.epoch_counter, train_time_ms, test_time_ms, loss, 0, 0, 0, 0, client_id=self.id)
         self.epoch_results.append(data)
 
         # Copy GPU tensors to CPU

@@ -6,6 +6,9 @@ from typing import List
 import torch
 import numpy as np
 
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import classification_report
+
 from dataclass_csv import DataclassWriter
 from torch.distributed import rpc
 
@@ -98,6 +101,24 @@ class Federator:
         self.device_num = self.config.world_size - 1
         logging.info(self.rule)
         self.states = []
+        self._epoch = 0
+
+        self.loss_function = self.args.get_loss_function()()
+        self.device = None
+        self.init_device()
+        self.dataset = None
+        self.init_dataloader()
+
+    def init_dataloader(self):
+        self.args.distributed = True
+        self.args.rank = 0
+        self.dataset = self.args.DistDatasets[self.args.dataset_name](self.args)
+
+    def init_device(self):
+        if self.args.cuda and torch.cuda.is_available():
+            return torch.device("cuda:0")
+        else:
+            return torch.device("cpu")
 
     def create_clients(self, client_id_triple):
         for id, rank, world_size in client_id_triple:
@@ -188,8 +209,13 @@ class Federator:
             for param in client_weights[i].values():
                 self.states[i].append(param.flatten())
         self.states = list(zip(*self.states))
+        for i in range(len(self.states)):
+            self.states[i] = torch.stack(self.states[i])
+        logging.info(f"round {self._epoch} state saved")
         self.attack()
+        logging.info(f"round {self._epoch} attack finished")
         self.update()
+        logging.info(f"round {self._epoch} update finished")
         self.states = []
         return self.model.state_dict()
 
@@ -204,7 +230,7 @@ class Federator:
             for v in self.model.state_dict().values():
                 v = v.flatten()
                 for j in range(len(self.states[i][0])):
-                    result = self._attack([self.states[i][k][j] for k in range(self.device_num)], v[j])
+                    result = self._attack(self.states[i][:, j], v[j])
                     for k in range(len(result)):
                         self.states[i][k][j] = result[k]
                 i += 1
@@ -392,7 +418,7 @@ class Federator:
             for k, v in self.model.state_dict().items():
                 t = torch.zeros_like(self.states[i][0])
                 for j in range(t.shape[0]):
-                    t[j] = self.aggregate([self.states[i][p][j] for p in range(self.device_num)])
+                    t[j] = self.aggregate(self.states[i][:, j])
                 d[k] = t.reshape_as(v)
                 d[k].requires_grad = v.requires_grad
                 i += 1
@@ -407,6 +433,18 @@ class Federator:
 
         self.model.load_state_dict(d)
 
+    def calculate_class_precision(self, confusion_mat):
+        """
+        Calculates the precision for each class from a confusion matrix.
+        """
+        return np.diagonal(confusion_mat) / np.sum(confusion_mat, axis=0)
+
+    def calculate_class_recall(self, confusion_mat):
+        """
+        Calculates the recall for each class from a confusion matrix.
+        """
+        return np.diagonal(confusion_mat) / np.sum(confusion_mat, axis=1)
+
     def test_global_model(self):
         """
         Test global model
@@ -415,6 +453,41 @@ class Federator:
         """
         # self.dataset = self.args.DistDatasets[self.args.dataset_name](self.args)
         logging.info(f'rank: {self.args.get_rank()}')  # group 0 should have mixed classes
+        self.model.eval()
+
+        correct = 0
+        total = 0
+        targets_ = []
+        pred_ = []
+        loss = 0.0
+        with torch.no_grad():
+            for (images, labels) in self.dataset.get_test_loader():
+                images, labels = images.to(self.device), labels.to(self.device)
+
+                outputs = self.model(images)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+                targets_.extend(labels.cpu().view_as(predicted).numpy())
+                pred_.extend(predicted.cpu().numpy())
+
+                loss += self.loss_function(outputs, labels).item()
+
+        accuracy = 100 * correct / total
+        confusion_mat = confusion_matrix(targets_, pred_)
+
+        class_precision = self.calculate_class_precision(confusion_mat)
+        class_recall = self.calculate_class_recall(confusion_mat)
+
+        self.args.get_logger().debug('Test set: Accuracy: {}/{} ({:.0f}%)'.format(correct, total, accuracy))
+        self.args.get_logger().debug('Test set: Loss: {}'.format(loss))
+        self.args.get_logger().debug("Classification Report:\n" + classification_report(targets_, pred_))
+        self.args.get_logger().debug("Confusion Matrix:\n" + str(confusion_mat))
+        self.args.get_logger().debug("Class precision: {}".format(str(class_precision)))
+        self.args.get_logger().debug("Class recall: {}".format(str(class_recall)))
+
+        return accuracy, loss, class_precision, class_recall
 
     def remote_run_epoch(self, epochs):
         responses = []
@@ -499,7 +572,9 @@ class Federator:
         epoch_to_run = self.config.epochs
         epoch_size = self.config.epochs_per_cycle
         for epoch in range(epoch_to_run):
-            self.test_global_model()
+            self._epoch = epoch + 1
+            if epoch % 10 == 0:
+                self.test_global_model()
             print(f'Running epoch {epoch}')
             self.remote_run_epoch(epoch_size)
             addition += 1
@@ -508,5 +583,8 @@ class Federator:
 
         logging.info(f'Saving data')
         self.save_epoch_data()
+
+        results = self.test_global_model()
+        logging.info(repr(results))
         logging.info(f'Federator is stopping')
 
