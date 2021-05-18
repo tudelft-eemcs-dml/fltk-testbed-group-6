@@ -312,10 +312,7 @@ class Federator:
                 dists.append(euclidean_dist)
             sorted_dists = sorted(dists)
             records[i] = sum(sorted_dists[:n])
-        self.sorted_records = dict(sorted(records.items(), key=lambda item: item[1]))  # also used for calculating epsilon
-
-        logging.info(f'sorted: {self.sorted_records}')
-
+        self.sorted_records = dict(sorted(records.items(), key=lambda item: (item[1].item(), item[0])))  # also used for calculating epsilon
         index = next(iter(self.sorted_records))
         logging.info('Model selected by Krum: ' + str(index+1))
 
@@ -484,13 +481,13 @@ class Federator:
                         current_compromised_states = []
                         for i in range(self.compromised):
                             current_compromised_states.append(new_compromised_w_1)
-                        for i in range(self.compromised+1, self.device_num):
+                        for i in range(self.compromised, self.device_num):
                             current_compromised_states.append(self.compromised_states[i])
                         index, flatten_params = self.krum(current_compromised_states)
             elif self.attack_type == 'partial':
                 current_compromised_states = [self.first_compromised_model]
                 for i in range(1, self.compromised):
-                    current_compromised_states.append(self.states[i])  # use before attack compromised models as benign models
+                    current_compromised_states.append(self.flatten_states[i])  # use before attack compromised models as benign models
                 index, flatten_params = self.krum(current_compromised_states)
                 num_compromised_models = 1
                 while index != 1:
@@ -503,7 +500,7 @@ class Federator:
                         for i in range(num_compromised_models):
                             current_compromised_states.append(new_compromised_w_1)
                         for i in range(self.compromised):
-                            current_compromised_states.append(self.states[i])
+                            current_compromised_states.append(self.flatten_states[i])
                         index, flatten_params = self.krum(current_compromised_states)
 
             new_compromised_w_1 = self._attack(None, None)  # calculated with the solved lambda

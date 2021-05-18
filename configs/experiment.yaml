@@ -10,7 +10,7 @@ cuda: false
 experiment_prefix: 'experiment_sample'
 output_location: 'output'
 tensor_board_active: true
-clients_per_round: 20
+clients_per_round: 10
 sampler: "p degree"
 sampler_args:
   - 0.5     # p degree
@@ -20,8 +20,8 @@ system:
     hostname: '192.168.1.102'
     nic: 'en0'
   clients:
-    amount: 20
+    amount: 10
 attack:
-  compromised_num: 4
-  attack_type: 'full'
+  compromised_num: 2
+  attack_type: 'partial'
   aggregation_rule: 'krum'
