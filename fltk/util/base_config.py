@@ -155,6 +155,9 @@ class BareConfig:
             if 'aggregation_rule' in cfg['attack']:
                 self.aggregation_rule = cfg['attack']['aggregation_rule']
 
+        if 'batch_size' in cfg:
+            self.batch_size = cfg['batch_size']
+
     def init_logger(self, logger):
         self.logger = logger
 

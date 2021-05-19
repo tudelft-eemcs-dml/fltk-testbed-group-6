@@ -227,6 +227,17 @@ class Federator:
         if self.attack_type == 'flip':
             return
         elif self.attack_type == 'no':
+            if self.rule == 'krum':
+                self.flatten_states = []
+                for params in self.states:
+                    weight = params['linear.weight'].flatten()
+                    bias = params['linear.bias']
+                    flatten_params = torch.cat((weight, bias))
+                    self.flatten_states.append(flatten_params)
+
+                weight = self.model.state_dict()['linear.weight'].flatten()
+                bias = self.model.state_dict()['linear.bias']
+                self.flatten_global = torch.cat((weight, bias))
             return
 
         if self.rule == 'trimmed':
@@ -250,6 +261,8 @@ class Federator:
             weight = self.model.state_dict()['linear.weight'].flatten()
             bias = self.model.state_dict()['linear.bias']
             self.flatten_global = torch.cat((weight, bias))
+
+            logging.info(f'flatten global: {self.flatten_global}')
 
             self.compromised_states = []
             self.first_compromised_model = self._attack(None, None)
@@ -364,7 +377,7 @@ class Federator:
                         euclidean_dist = torch.sum(((self.flatten_states[i] - self.flatten_states[j]) ** 2))
                         if euclidean_dist > largest_benign_dist:
                             largest_benign_dist = euclidean_dist
-            lambda_ += 1/sqrt(d) * largest_benign_dist
+            lambda_ += 1 / sqrt(d) * largest_benign_dist
         elif self.attack_type == 'partial':
             benign_dists = dict()
             for i in range(0, self.compromised):  # use before-attack compromised models as benign models
@@ -392,6 +405,8 @@ class Federator:
                         if euclidean_dist > largest_benign_dist:
                             largest_benign_dist = euclidean_dist
             lambda_ += 1 / sqrt(d) * largest_benign_dist
+
+        logging.info(f'Initial lambda: {lambda_}')
 
         return lambda_
 
@@ -484,6 +499,8 @@ class Federator:
                         for i in range(self.compromised, self.device_num):
                             current_compromised_states.append(self.compromised_states[i])
                         index, flatten_params = self.krum(current_compromised_states)
+                logging.info(f'lambda: {self.lambda_}')
+                new_compromised_w_1 = self._attack(None, None)  # calculated with the solved lambda
             elif self.attack_type == 'partial':
                 current_compromised_states = [self.first_compromised_model]
                 for i in range(1, self.compromised):
@@ -494,19 +511,25 @@ class Federator:
                     self.lambda_ *= 1 / 2
                     if self.lambda_ < self.lambda_threshold:
                         num_compromised_models += 1
-                    else:
-                        new_compromised_w_1 = self._attack(None, None)
-                        current_compromised_states = []
-                        for i in range(num_compromised_models):
-                            current_compromised_states.append(new_compromised_w_1)
-                        for i in range(self.compromised):
-                            current_compromised_states.append(self.flatten_states[i])
-                        index, flatten_params = self.krum(current_compromised_states)
 
-            new_compromised_w_1 = self._attack(None, None)  # calculated with the solved lambda
+                    new_compromised_w_1 = self._attack(None, None)
+                    current_compromised_states = []
+                    for _ in range(num_compromised_models):
+                        current_compromised_states.append(new_compromised_w_1)
+                    for i in range(self.compromised):
+                        current_compromised_states.append(self.flatten_states[i])
+                    index, flatten_params = self.krum(current_compromised_states)
+
+                logging.info(f'lambda: {self.lambda_}')
+                new_compromised_w_1 = self._attack(None, None)  # calculated with the solved lambda
+            elif self.attack_type == 'no':
+                index, flatten_params = self.krum(self.flatten_states)
+                new_compromised_w_1 = flatten_params
+
             d['linear.weight'], d['linear.bias'] = self.krum_reverse_flatten_lr(new_compromised_w_1)
 
         self.model.load_state_dict(d)
+        logging.info(f'update: {self.model.state_dict()}')
 
     def calculate_class_precision(self, confusion_mat):
         """
@@ -555,6 +578,8 @@ class Federator:
         class_precision = self.calculate_class_precision(confusion_mat)
         class_recall = self.calculate_class_recall(confusion_mat)
 
+        logging.info(self.model.state_dict())
+
         self.args.get_logger().debug('Test set: Accuracy: {}/{} ({:.0f}%)'.format(correct, total, accuracy))
         self.args.get_logger().debug('Test set: Loss: {}'.format(loss))
         self.args.get_logger().debug("Classification Report:\n" + classification_report(targets_, pred_))
@@ -574,7 +599,7 @@ class Federator:
             res = responses[-1]
             epoch_data, weights = res[1].wait()
             self.client_data[epoch_data.client_id].append(epoch_data)
-            logging.info(f'{res[0]} had a loss of {epoch_data.loss}')
+            logging.info(f'{res[0]} had a train loss of {epoch_data.loss_train}')
             logging.info(f'{res[0]} had a epoch data of {epoch_data}')
 
             res[0].tb_writer.add_scalar('training loss',
