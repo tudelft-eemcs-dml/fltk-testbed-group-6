@@ -8,8 +8,8 @@ import yaml
 
 from fltk.nets import Cifar10CNN, FashionMNISTCNN, Cifar100ResNet, FashionMNISTResNet, Cifar10ResNet, Cifar100VGG
 
-SEED = 1
-torch.manual_seed(SEED)
+# SEED = 1
+# torch.manual_seed(SEED)
 
 class Arguments:
 

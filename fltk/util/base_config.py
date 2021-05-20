@@ -7,8 +7,8 @@ from fltk.nets import Cifar10CNN, FashionMNISTCNN, Cifar100ResNet, FashionMNISTR
 from fltk.datasets.non_iid_dataset.non_iid_mnist import NonIIDMNISTDataset
 from fltk.nets.mnist_lr import LRModel
 
-SEED = 1
-torch.manual_seed(SEED)
+# SEED = 1
+# torch.manual_seed(SEED)
 
 
 class BareConfig:

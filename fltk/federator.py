@@ -205,7 +205,7 @@ class Federator:
 
     def step(self, client_weights):
         self.states = []
-        if self.rule == 'trimmed':
+        if self.rule == 'trimmed' or self.rule == 'median':
             for i in range(self.device_num):
                 self.states.append([])
                 for param in client_weights[i].values():
@@ -240,7 +240,7 @@ class Federator:
                 self.flatten_global = torch.cat((weight, bias))
             return
 
-        if self.rule == 'trimmed':
+        if self.rule == 'trimmed' or self.rule == 'median':
             i = 0
             for v in self.model.state_dict().values():
                 v = v.flatten()
@@ -416,7 +416,7 @@ class Federator:
         return weights, bias
 
     def poisoning(self, params, original, full):
-        if self.rule == 'trimmed' or self.rule == 'medium':
+        if self.rule == 'trimmed' or self.rule == 'median':
             params = torch.Tensor(params)
             if full:
                 res = self.trimmed(params, self.compromised)
@@ -468,12 +468,12 @@ class Federator:
     def aggregate(self, params):
         if self.rule == 'trimmed':
             return self.trimmed(params, self.compromised)
-        if self.rule == 'medium':
-            return self.trimmed(params, (params - 1) // 2)
+        if self.rule == 'median':
+            return self.trimmed(params, (len(params) - 1) // 2)
         return params[0]
 
     def update(self):
-        if self.rule == 'trimmed':
+        if self.rule == 'trimmed' or self.rule == 'median':
             d = {}
             i = 0
             for k, v in self.model.state_dict().items():
