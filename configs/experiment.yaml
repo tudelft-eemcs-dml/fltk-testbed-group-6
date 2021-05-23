@@ -1,6 +1,6 @@
 ---
 # Experiment configuration
-total_epochs: 100
+total_epochs: 500
 epochs_per_cycle: 1
 wait_for_clients: true
 net: MNISTLR
@@ -17,8 +17,8 @@ sampler_args:
   - 42    # random seed
 system:
   federator:
-    hostname: '192.168.1.102'
-    nic: 'en0'
+    hostname: '192.168.0.105'
+    nic: 'wifi2'
   clients:
     amount: 20
 attack:

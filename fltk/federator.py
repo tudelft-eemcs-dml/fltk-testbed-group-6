@@ -30,8 +30,7 @@ from fltk.util.results import EpochData
 from fltk.util.tensor_converter import convert_distributed_data_into_numpy
 from math import sqrt
 
-logging.basicConfig(level=logging.DEBUG)
-
+logging.basicConfig(level=logging.DEBUG, filename='log.txt', filemode='a+')
 
 def _call_method(method, rref, *args, **kwargs):
     return method(rref.local_value(), *args, **kwargs)
@@ -303,14 +302,14 @@ class Federator:
         res = sum(params) / len(params)
         return float(res)
 
-    def krum(self, compromised_states):
+    def krum(self, compromised_states, n=None):
         """
         select the local model with the smallest sum of distance as global model
         :param compromised_states: states containing compromised states (variable length)
         :return: selected model
         """
-
-        n = self.device_num - self.compromised - 2
+        if n is None:
+            n = self.device_num - self.compromised - 2
         if n < 0:
             logging.warning('Too many compromised workers, c should be < (m-2)/2')
             n = 0
@@ -320,11 +319,10 @@ class Federator:
             state = compromised_states[i]
             dists = []
             for another_state in compromised_states:
-                if torch.all(state.eq(another_state)): continue
                 euclidean_dist = torch.sum(((state - another_state) ** 2))
                 dists.append(euclidean_dist)
             sorted_dists = sorted(dists)
-            records[i] = sum(sorted_dists[:n])
+            records[i] = sum(sorted_dists[1:n+1])
         self.sorted_records = dict(sorted(records.items(), key=lambda item: (item[1].item(), item[0])))  # also used for calculating epsilon
         index = next(iter(self.sorted_records))
         logging.info('Model selected by Krum: ' + str(index+1))
@@ -422,6 +420,8 @@ class Federator:
                 res = self.trimmed(params, self.compromised)
                 wmax = torch.max(params[self.compromised:])
                 wmin = torch.min(params[self.compromised:])
+                # logging.info(repr((original, res, wmax, wmin)))
+                # logging.info(repr(params))
                 if res > original:
                     for i in range(self.compromised):
                         if wmin <= 0:
@@ -434,6 +434,7 @@ class Federator:
                             params[i] = np.random.uniform(wmax, 2 * wmax)
                         else:
                             params[i] = np.random.uniform(wmax / 2, wmax)
+                # logging.info((repr(params)))
                 return params
             else:
                 wmean = torch.mean(params[:self.compromised])
@@ -500,17 +501,28 @@ class Federator:
                             current_compromised_states.append(self.compromised_states[i])
                         index, flatten_params = self.krum(current_compromised_states)
                 logging.info(f'lambda: {self.lambda_}')
-                new_compromised_w_1 = self._attack(None, None)  # calculated with the solved lambda
+                new_compromised_w_1 = self._attack(None, None)
+                for i in range(self.compromised):
+                    self.compromised_states[i] = new_compromised_w_1
+                _, new_compromised_w_1 = self.krum(self.compromised_states)
             elif self.attack_type == 'partial':
+                init_lambda = self.lambda_
+                new_compromised_w_1 = self.first_compromised_model
                 current_compromised_states = [self.first_compromised_model]
-                for i in range(1, self.compromised):
+                for i in range(self.compromised):
                     current_compromised_states.append(self.flatten_states[i])  # use before attack compromised models as benign models
-                index, flatten_params = self.krum(current_compromised_states)
+                index, flatten_params = self.krum(current_compromised_states,
+                                                  len(current_compromised_states) - 1)
                 num_compromised_models = 1
                 while index != 1:
-                    self.lambda_ *= 1 / 2
+
                     if self.lambda_ < self.lambda_threshold:
                         num_compromised_models += 1
+                        if num_compromised_models > self.compromised:
+                            break
+                        self.lambda_ = max(init_lambda, self.lambda_threshold)
+                    else:
+                        self.lambda_ *= 1 / 2
 
                     new_compromised_w_1 = self._attack(None, None)
                     current_compromised_states = []
@@ -518,10 +530,11 @@ class Federator:
                         current_compromised_states.append(new_compromised_w_1)
                     for i in range(self.compromised):
                         current_compromised_states.append(self.flatten_states[i])
-                    index, flatten_params = self.krum(current_compromised_states)
-
-                logging.info(f'lambda: {self.lambda_}')
-                new_compromised_w_1 = self._attack(None, None)  # calculated with the solved lambda
+                    index, flatten_params = self.krum(current_compromised_states,
+                                                      len(current_compromised_states) - 1)
+                for i in range(self.compromised):
+                    self.compromised_states[i] = new_compromised_w_1
+                _, new_compromised_w_1 = self.krum(self.compromised_states)
             elif self.attack_type == 'no':
                 index, flatten_params = self.krum(self.flatten_states)
                 new_compromised_w_1 = flatten_params

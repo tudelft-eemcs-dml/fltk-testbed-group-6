@@ -20,7 +20,7 @@ class BareConfig:
         self.test_batch_size = 1000
         self.epochs = 1
         self.lr = 0.001
-        self.momentum = 0.9
+        self.momentum = 0
         self.cuda = False
         self.shuffle = False
         self.log_interval = 10
@@ -28,7 +28,7 @@ class BareConfig:
         self.contribution_measurement_round = 1
         self.contribution_measurement_metric = 'Influence'
 
-        self.scheduler_step_size = 50
+        self.scheduler_step_size = 1000
         self.scheduler_gamma = 0.5
         self.min_lr = 1e-10
 

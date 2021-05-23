@@ -20,7 +20,7 @@ import yaml
 
 from fltk.util.results import EpochData
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, filename='log.txt', filemode='a+')
 
 
 
