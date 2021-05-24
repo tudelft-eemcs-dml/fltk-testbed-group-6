@@ -249,7 +249,6 @@ class Federator:
                         self.states[i][k][j] = result[k]
                 i += 1
         elif self.rule == 'krum':
-            # for now only works in minst_lr
             self.flatten_states = []
             for params in self.states:
                 weight = params['linear.weight'].flatten()
@@ -261,17 +260,15 @@ class Federator:
             bias = self.model.state_dict()['linear.bias']
             self.flatten_global = torch.cat((weight, bias))
 
-            logging.info(f'flatten global: {self.flatten_global}')
-
             self.compromised_states = []
             self.first_compromised_model = self._attack(None, None)
             self.compromised_states.append(self.first_compromised_model)
             for i in range(1, len(self.flatten_states)):
                 if i <= self.compromised - 1:
-                    result = self.first_compromised_model  # would be changed later
+                    result = self.first_compromised_model
                 else:
                     result = self.flatten_states[i]
-                self.compromised_states.append(result)
+                self.compromised_states.append(result)  # compromised states at the beginning of each round
 
     def _attack(self, params, original):
         res = params
@@ -323,13 +320,17 @@ class Federator:
                 dists.append(euclidean_dist)
             sorted_dists = sorted(dists)
             records[i] = sum(sorted_dists[1:n+1])
-        self.sorted_records = dict(sorted(records.items(), key=lambda item: (item[1].item(), item[0])))  # also used for calculating epsilon
+        self.sorted_records = dict(sorted(records.items(), key=lambda item: (item[1].item(), item[0])))  # sort according to both the distance and the index
         index = next(iter(self.sorted_records))
-        logging.info('Model selected by Krum: ' + str(index+1))
 
         return index+1, compromised_states[index]
 
     def krum_changing_direction(self, states):
+        """
+        calculate changing direction vector
+        :param states: received stated from workers (not compromised yet)
+        :return: changing direction vector
+        """
         _, global_model = self.krum(states)
         previous_global = self.flatten_global
         s = torch.where(global_model > previous_global, 1, -1)
@@ -338,7 +339,7 @@ class Federator:
     def krum_lambda(self):
         '''
         calculate the initial value of lambda, only do this at the beginning of each iteration
-        :return:
+        :return: lambda_
         '''
 
         d = self.flatten_global.shape[0]
@@ -409,6 +410,13 @@ class Federator:
         return lambda_
 
     def krum_reverse_flatten_lr(self, params, input_dim=784, n_classes=10):
+        """
+        reverse flatten model parameters to its original shape
+        :param params: flatten parameters
+        :param input_dim: 784
+        :param n_classes: 10
+        :return: weights, bias
+        """
         bias = params[-n_classes:]
         weights = params[:-n_classes].view(n_classes, input_dim)
         return weights, bias
