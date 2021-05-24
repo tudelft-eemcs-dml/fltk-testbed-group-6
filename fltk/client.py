@@ -20,7 +20,7 @@ import yaml
 
 from fltk.util.results import EpochData
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, filename='log.txt', filemode='a+')
 
 
 
@@ -69,6 +69,8 @@ class Client:
                                           self.args.get_scheduler_gamma(),
                                           self.args.get_min_lr())
 
+        self.batch_index = 0
+
     def init_device(self):
         if self.args.cuda and torch.cuda.is_available():
             return torch.device("cuda:0")
@@ -103,8 +105,8 @@ class Client:
         self.args.distributed = True
         self.args.rank = self.rank
         self.args.world_size = self.world_size
-        # self.dataset = DistCIFAR10Dataset(self.args)
         self.dataset = self.args.DistDatasets[self.args.dataset_name](self.args)
+        self.data_iter = iter(self.dataset.get_train_loader())
         self.finished_init = True
         logging.info('Done with init')
 
@@ -186,24 +188,53 @@ class Client:
         if self.args.distributed:
             self.dataset.train_sampler.set_epoch(epoch)
 
-        for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
-            inputs, labels = inputs.to(self.device), labels.to(self.device)
+        # for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
+        #     inputs, labels = inputs.to(self.device), labels.to(self.device)
+        #
+        #     # zero the parameter gradients
+        #     self.optimizer.zero_grad()
+        #
+        #     # forward + backward + optimize
+        #     outputs = self.net(inputs)
+        #     loss = self.loss_function(outputs, labels)
+        #     loss.backward()
+        #     self.optimizer.step()
+        #
+        #     # print statistics
+        #     running_loss += loss.item()
+        #     if i % self.args.get_log_interval() == 0:
+        #         self.args.get_logger().info('[%d, %5d] loss: %.3f' % (epoch, i, running_loss / self.args.get_log_interval()))
+        #         final_running_loss = running_loss / self.args.get_log_interval()
+        #         running_loss = 0.0
+        #
+        #     logging.info(f'Client rank: {self.rank}, Batch index: {i}')
+        #     logging.info(labels)
+        #
+        #     break
 
-            # zero the parameter gradients
-            self.optimizer.zero_grad()
+        try:
+            inputs, labels = self.data_iter.next()
+        except Exception as e:
+            self.data_iter = iter(self.dataset.get_train_loader())
+            inputs, labels = self.data_iter.next()
+            logging.info(f'Initialize new data iterator in client {self.rank}.')
+        self.batch_index += 1
+        inputs, labels = inputs.to(self.device), labels.to(self.device)
 
-            # forward + backward + optimize
-            outputs = self.net(inputs)
-            loss = self.loss_function(outputs, labels)
-            loss.backward()
-            self.optimizer.step()
+        # zero the parameter gradients
+        self.optimizer.zero_grad()
 
-            # print statistics
-            running_loss += loss.item()
-            if i % self.args.get_log_interval() == 0:
-                self.args.get_logger().info('[%d, %5d] loss: %.3f' % (epoch, i, running_loss / self.args.get_log_interval()))
-                final_running_loss = running_loss / self.args.get_log_interval()
-                running_loss = 0.0
+        # forward + backward + optimize
+        outputs = self.net(inputs)
+        loss = self.loss_function(outputs, labels)
+        loss.backward()
+        self.optimizer.step()
+
+        # print statistics
+        running_loss += loss.item()
+        if self.batch_index % self.args.get_log_interval() == 0:
+            self.args.get_logger().info('[%d, %5d] loss: %.3f' % (epoch, self.batch_index, running_loss / self.args.get_log_interval()))
+            final_running_loss = running_loss / self.args.get_log_interval()
 
         self.scheduler.step()
 
@@ -211,7 +242,7 @@ class Client:
         if self.args.should_save_model(epoch):
             self.save_model(epoch, self.args.get_epoch_save_end_suffix())
 
-        return final_running_loss, self.get_nn_parameters()
+        return loss.item(), self.get_nn_parameters()
 
     def test(self):
         self.net.eval()
@@ -252,7 +283,7 @@ class Client:
 
     def run_epochs(self, num_epoch):
 
-        accuracy, test_loss, class_precision, class_recall = self.test()
+        # accuracy, test_loss, class_precision, class_recall = self.test()
 
         start_time_train = datetime.datetime.now()
         loss = weights = None
@@ -263,11 +294,12 @@ class Client:
         train_time_ms = int(elapsed_time_train.total_seconds()*1000)
 
         start_time_test = datetime.datetime.now()
-        accuracy, test_loss, class_precision, class_recall = self.test()
+        # accuracy, test_loss, class_precision, class_recall = self.test()
         elapsed_time_test = datetime.datetime.now() - start_time_test
         test_time_ms = int(elapsed_time_test.total_seconds()*1000)
 
-        data = EpochData(self.epoch_counter, train_time_ms, test_time_ms, loss, accuracy, test_loss, class_precision, class_recall, client_id=self.id)
+        # data = EpochData(self.epoch_counter, train_time_ms, test_time_ms, loss, accuracy, test_loss, class_precision, class_recall, client_id=self.id)
+        data = EpochData(self.epoch_counter, train_time_ms, test_time_ms, loss, 0, 0, 0, 0, client_id=self.id)
         self.epoch_results.append(data)
 
         # Copy GPU tensors to CPU

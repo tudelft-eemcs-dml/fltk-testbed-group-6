@@ -7,8 +7,8 @@ from fltk.nets import Cifar10CNN, FashionMNISTCNN, Cifar100ResNet, FashionMNISTR
 from fltk.datasets.non_iid_dataset.non_iid_mnist import NonIIDMNISTDataset
 from fltk.nets.mnist_lr import LRModel
 
-SEED = 1
-torch.manual_seed(SEED)
+# SEED = 1
+# torch.manual_seed(SEED)
 
 
 class BareConfig:
@@ -20,7 +20,7 @@ class BareConfig:
         self.test_batch_size = 1000
         self.epochs = 1
         self.lr = 0.001
-        self.momentum = 0.9
+        self.momentum = 0
         self.cuda = False
         self.shuffle = False
         self.log_interval = 10
@@ -28,7 +28,7 @@ class BareConfig:
         self.contribution_measurement_round = 1
         self.contribution_measurement_metric = 'Influence'
 
-        self.scheduler_step_size = 50
+        self.scheduler_step_size = 1000
         self.scheduler_gamma = 0.5
         self.min_lr = 1e-10
 
@@ -154,6 +154,9 @@ class BareConfig:
                 self.attack_type = cfg['attack']['attack_type']
             if 'aggregation_rule' in cfg['attack']:
                 self.aggregation_rule = cfg['attack']['aggregation_rule']
+
+        if 'batch_size' in cfg:
+            self.batch_size = cfg['batch_size']
 
     def init_logger(self, logger):
         self.logger = logger

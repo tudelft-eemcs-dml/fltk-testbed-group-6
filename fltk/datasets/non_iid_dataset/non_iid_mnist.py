@@ -23,7 +23,7 @@ class NonIIDMNISTDataset(DistDataset):
         self.train_dataset = datasets.MNIST(root=self.get_args().get_data_path(), train=True, download=True,
                                          transform=transform)
         self.train_sampler = self.get_sampler(self.train_dataset)
-        self.train_loader = DataLoader(self.train_dataset, batch_size=16, sampler=self.train_sampler)
+        self.train_loader = DataLoader(self.train_dataset, batch_size=32, sampler=self.train_sampler)
 
     def init_test_dataset(self):
         self.get_args().get_logger().debug("Loading MNIST test data")
@@ -34,7 +34,7 @@ class NonIIDMNISTDataset(DistDataset):
         self.test_dataset = datasets.MNIST(root=self.get_args().get_data_path(), train=False, download=True,
                                         transform=transform)
         self.test_sampler = self.get_sampler(self.test_dataset)
-        self.test_loader = DataLoader(self.test_dataset, batch_size=16, sampler=self.test_sampler)
+        self.test_loader = DataLoader(self.test_dataset, batch_size=32, sampler=self.test_sampler)
     '''
     def load_train_dataset(self):
         self.get_args().get_logger().debug("Loading CIFAR10 train data")
