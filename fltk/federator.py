@@ -30,7 +30,7 @@ from fltk.util.results import EpochData
 from fltk.util.tensor_converter import convert_distributed_data_into_numpy
 from math import sqrt
 
-logging.basicConfig(level=logging.DEBUG, filename='log.txt', filemode='a+')
+logging.basicConfig(level=logging.DEBUG, filename='log.txt', filemode='w+')
 
 def _call_method(method, rref, *args, **kwargs):
     return method(rref.local_value(), *args, **kwargs)
@@ -249,6 +249,7 @@ class Federator:
                         self.states[i][k][j] = result[k]
                 i += 1
         elif self.rule == 'krum':
+
             self.flatten_states = []
             for params in self.states:
                 weight = params['linear.weight'].flatten()
@@ -261,14 +262,21 @@ class Federator:
             self.flatten_global = torch.cat((weight, bias))
 
             self.compromised_states = []
-            self.first_compromised_model = self._attack(None, None)
-            self.compromised_states.append(self.first_compromised_model)
-            for i in range(1, len(self.flatten_states)):
-                if i <= self.compromised - 1:
-                    result = self.first_compromised_model
-                else:
-                    result = self.flatten_states[i]
-                self.compromised_states.append(result)  # compromised states at the beginning of each round
+            if self.attack_type == 'gaussian':
+                self.flatten_states = torch.stack(self.flatten_states, dim=0)
+                for i in range(len(self.flatten_global)):
+                    res = self._attack(self.flatten_states[:, i], None)
+                    self.compromised_states.append(res)
+                self.compromised_states = torch.cat(self.compromised_states, dim=0).reshape(-1, len(self.flatten_global))
+            else:
+                self.first_compromised_model = self._attack(None, None)
+                self.compromised_states.append(self.first_compromised_model)
+                for i in range(1, len(self.flatten_states)):
+                    if i <= self.compromised - 1:
+                        result = self.first_compromised_model
+                    else:
+                        result = self.flatten_states[i]
+                    self.compromised_states.append(result)  # compromised states at the beginning of each round
 
     def _attack(self, params, original):
         res = params
@@ -320,7 +328,8 @@ class Federator:
                 dists.append(euclidean_dist)
             sorted_dists = sorted(dists)
             records[i] = sum(sorted_dists[1:n+1])
-        self.sorted_records = dict(sorted(records.items(), key=lambda item: (item[1].item(), item[0])))  # sort according to both the distance and the index
+        print(f'records: {records}')
+        self.sorted_records = dict(sorted(records.items(), key=lambda item: (item[1], item[0])))  # sort according to both the distance and the index
         index = next(iter(self.sorted_records))
 
         return index+1, compromised_states[index]
@@ -543,7 +552,7 @@ class Federator:
                 for i in range(self.compromised):
                     self.compromised_states[i] = new_compromised_w_1
                 _, new_compromised_w_1 = self.krum(self.compromised_states)
-            elif self.attack_type == 'no':
+            elif self.attack_type == 'no' or self.attack_type == 'gaussian':
                 index, flatten_params = self.krum(self.flatten_states)
                 new_compromised_w_1 = flatten_params
 
@@ -570,7 +579,6 @@ class Federator:
 
         :return:
         """
-        # self.dataset = self.args.DistDatasets[self.args.dataset_name](self.args)
         logging.info(f'rank: {self.args.get_rank()}')  # group 0 should have mixed classes
         self.model.eval()
 

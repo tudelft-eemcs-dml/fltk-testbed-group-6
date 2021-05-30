@@ -11,10 +11,10 @@ def run_all(compromised=2, num=5):
     :param num: 
     :return: 
     """
-    with open("flavg_stdout.txt", "wb") as out, open("flavg_stderr.txt", "wb") as err:
-        subprocess.Popen("python3 -m fltk single configs/experiment.yaml --rank=0", shell=True, stdout=out,stderr=err)
+    with open("fl_stdout.txt", "wb") as out, open("fl_stderr.txt", "wb") as err:
+        subprocess.Popen("python3 -m fltk single configs/experiment.yaml --rank=0", shell=True, stdout=out, stderr=err)
         for i in range(num):
-            subprocess.Popen("python3 -m fltk single configs/experiment.yaml --rank={}".format(str(i+1)), shell=True, stdout=out,stderr=err)
+            subprocess.Popen("python3 -m fltk single configs/experiment.yaml --rank={}".format(str(i+1)), shell=True, stdout=out, stderr=err)
 
 
 if __name__ == '__main__':
