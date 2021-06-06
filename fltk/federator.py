@@ -5,6 +5,7 @@ from typing import List
 
 import torch
 import numpy as np
+import random
 
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
@@ -30,7 +31,7 @@ from fltk.util.results import EpochData
 from fltk.util.tensor_converter import convert_distributed_data_into_numpy
 from math import sqrt
 
-logging.basicConfig(level=logging.DEBUG, filename='log.txt', filemode='w+')
+logging.basicConfig(level=logging.DEBUG)
 
 def _call_method(method, rref, *args, **kwargs):
     return method(rref.local_value(), *args, **kwargs)
@@ -101,6 +102,8 @@ class Federator:
         self.device_num = self.config.world_size - 1
         logging.info(f'Attacking rule: {self.rule}')
         self.states = []
+        self.improve = config.improve
+        self._improved_states = []
         self._epoch = 0
 
         self.loss_function = self.args.get_loss_function()()
@@ -202,7 +205,7 @@ class Federator:
 
         return model
 
-    def step(self, client_weights):
+    def step(self, client_weights, new_weights=None):
         self.states = []
         if self.rule == 'trimmed' or self.rule == 'median':
             for i in range(self.device_num):
@@ -212,6 +215,15 @@ class Federator:
             self.states = list(zip(*self.states))
             for i in range(len(self.states)):
                 self.states[i] = torch.stack(self.states[i])
+            if new_weights is not None:
+                self._improved_states = []
+                for i in range(self.compromised):
+                    self._improved_states.append([])
+                    for param in new_weights[i].values():
+                        self._improved_states[i].append(param.flatten())
+                self._improved_states = list(zip(*self._improved_states))
+                for i in range(len(self._improved_states)):
+                    self._improved_states[i] = torch.stack(self._improved_states[i])
         elif self.rule == 'krum':
             self.states = client_weights
         logging.info(f"round {self._epoch} state saved")
@@ -244,7 +256,8 @@ class Federator:
             for v in self.model.state_dict().values():
                 v = v.flatten()
                 for j in range(len(self.states[i][0])):
-                    result = self._attack(self.states[i][:, j], v[j])
+                    result = self._attack(self.states[i][:, j], v[j],
+                                          torch.mean(self._improved_states[i][:, j]))
                     for k in range(len(result)):
                         self.states[i][k][j] = result[k]
                 i += 1
@@ -278,12 +291,12 @@ class Federator:
                         result = self.flatten_states[i]
                     self.compromised_states.append(result)  # compromised states at the beginning of each round
 
-    def _attack(self, params, original):
+    def _attack(self, params, original, _improved_mean=None):
         res = params
         if self.attack_type == 'partial':
-            res = self.poisoning(params, original, False)
+            res = self.poisoning(params, original, False, _improved_mean)
         if self.attack_type == 'full':
-            res = self.poisoning(params, original, True)
+            res = self.poisoning(params, original, True, _improved_mean)
         if self.attack_type == 'gaussian':
             res = self.gaussian(params)
         return res
@@ -430,7 +443,7 @@ class Federator:
         weights = params[:-n_classes].view(n_classes, input_dim)
         return weights, bias
 
-    def poisoning(self, params, original, full):
+    def poisoning(self, params, original, full, _improved_mean=None):
         if self.rule == 'trimmed' or self.rule == 'median':
             params = torch.Tensor(params)
             if full:
@@ -456,7 +469,11 @@ class Federator:
             else:
                 wmean = torch.mean(params[:self.compromised])
                 std = torch.std(params[:self.compromised])
-                if wmean > original:
+                if _improved_mean is not None:
+                    compared = _improved_mean
+                else:
+                    compared = wmean
+                if compared > original:
                     for i in range(self.compromised):
                         params[i] = np.random.uniform(wmean - 4 * std, wmean - 3 * std)
                 else:
@@ -640,7 +657,38 @@ class Federator:
                                         self.epoch_counter * res[0].data_size)
 
             client_weights.append(weights)
-        updated_model = self.step(client_weights)
+        improve = self.improve
+        if improve > 0:
+            new_weights = []
+            if improve == 2:
+                data = []
+                for i in range(self.compromised):
+                    client = selected_clients[i]
+                    responses.append((client, _remote_method_async(Client.get_batch, client.ref, epoch=epochs)))
+                    res = responses[-1]
+                    inputs, labels = res[1].wait()
+                    data.extend(list(zip(inputs, labels)))
+                for i in range(self.compromised):
+                    client = selected_clients[i]
+                    responses.append((client, _remote_method_async(Client.train_on_batch, client.ref,
+                                                                   data=list(zip(*random.sample(data, 32))))))
+                    res = responses[-1]
+                    epoch_data, weights = res[1].wait()
+                    new_weights.append(weights)
+            elif improve == 1:
+                for i in range(self.compromised):
+                    client = selected_clients[i]
+                    responses.append((client, _remote_method_async(Client.get_batch, client.ref, epoch=epochs)))
+                    res = responses[-1]
+                    data = res[1].wait()
+                    responses.append((client, _remote_method_async(Client.train_on_batch, client.ref,
+                                                                   data=data)))
+                    res = responses[-1]
+                    epoch_data, weights = res[1].wait()
+                    new_weights.append(weights)
+            updated_model = self.step(client_weights, new_weights)
+        else:
+            updated_model = self.step(client_weights)
         self.update_local(updated_model)
 
     def update_local(self, updated_model):

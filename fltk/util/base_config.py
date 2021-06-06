@@ -89,6 +89,7 @@ class BareConfig:
         self.attack_type = 'no'
         self.compromised_num = 0
         self.aggregation_rule = 'trimmed'
+        self.improve = 0
 
     ###########
     # Methods #
@@ -154,6 +155,8 @@ class BareConfig:
                 self.attack_type = cfg['attack']['attack_type']
             if 'aggregation_rule' in cfg['attack']:
                 self.aggregation_rule = cfg['attack']['aggregation_rule']
+            if 'improve' in cfg['attack']:
+                self.improve = cfg['attack']['improve']
 
         if 'batch_size' in cfg:
             self.batch_size = cfg['batch_size']
