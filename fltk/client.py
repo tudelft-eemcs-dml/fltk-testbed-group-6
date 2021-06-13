@@ -20,7 +20,7 @@ import yaml
 
 from fltk.util.results import EpochData
 
-logging.basicConfig(level=logging.DEBUG, filename='log.txt', filemode='a+')
+logging.basicConfig(level=logging.DEBUG)
 
 
 
@@ -110,6 +110,10 @@ class Client:
         self.finished_init = True
         logging.info('Done with init')
 
+        # used for improved solution
+        self.cached_inputs = None
+        self.cached_labels = None
+
     def is_ready(self):
         return self.finished_init
 
@@ -172,7 +176,25 @@ class Client:
         self.net.load_state_dict(copy.deepcopy(new_params), strict=True)
         self.remote_log(f'Weights of the model are updated')
 
-    def train(self, epoch):
+    def get_batch(self, epoch):
+        if self.args.distributed:
+            self.dataset.train_sampler.set_epoch(epoch)
+        try:
+            inputs, labels = self.data_iter.next()
+        except Exception as e:
+            self.data_iter = iter(self.dataset.get_train_loader())
+            inputs, labels = self.data_iter.next()
+            logging.info(f'Initialize new data iterator in client {self.rank}.')
+        self.batch_index += 1
+        inputs, labels = inputs.to(self.device), labels.to(self.device)
+        self.cached_inputs = inputs
+        self.cached_labels = labels
+        return inputs, labels
+
+    def get_cached_batch(self):
+        return self.cached_inputs, self.cached_labels
+
+    def train(self, epoch, data=None):
         """
         :param epoch: Current epoch #
         :type epoch: int
@@ -185,8 +207,6 @@ class Client:
 
         running_loss = 0.0
         final_running_loss = 0.0
-        if self.args.distributed:
-            self.dataset.train_sampler.set_epoch(epoch)
 
         # for i, (inputs, labels) in enumerate(self.dataset.get_train_loader(), 0):
         #     inputs, labels = inputs.to(self.device), labels.to(self.device)
@@ -212,14 +232,10 @@ class Client:
         #
         #     break
 
-        try:
-            inputs, labels = self.data_iter.next()
-        except Exception as e:
-            self.data_iter = iter(self.dataset.get_train_loader())
-            inputs, labels = self.data_iter.next()
-            logging.info(f'Initialize new data iterator in client {self.rank}.')
-        self.batch_index += 1
-        inputs, labels = inputs.to(self.device), labels.to(self.device)
+        if data is None:
+            inputs, labels = self.get_batch(epoch)
+        else:
+            inputs, labels = data
 
         # zero the parameter gradients
         self.optimizer.zero_grad()
@@ -242,6 +258,20 @@ class Client:
         if self.args.should_save_model(epoch):
             self.save_model(epoch, self.args.get_epoch_save_end_suffix())
 
+        return loss.item(), self.get_nn_parameters()
+
+    def train_on_batch(self, data):
+        self.net.train()
+        inputs, labels = data
+        if type(inputs) is tuple:
+            inputs = torch.stack(inputs, dim=0)
+            labels = torch.stack(labels, dim=0)
+        self.optimizer.zero_grad()
+        outputs = self.net(inputs)
+        loss = self.loss_function(outputs, labels)
+        loss.backward()
+        self.optimizer.step()
+        self.scheduler.step()
         return loss.item(), self.get_nn_parameters()
 
     def test(self):
