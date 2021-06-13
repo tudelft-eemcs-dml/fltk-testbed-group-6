@@ -103,8 +103,11 @@ class Federator:
         logging.info(f'Attacking rule: {self.rule}')
         self.states = []
         self.improve = config.improve
+        self.improve_data_ratio = config.improve_data_ratio
         self._improved_states = []
         self._epoch = 0
+
+        self.compressed = self.config.compressed
 
         self.loss_function = self.args.get_loss_function()()
         self.device = None
@@ -205,6 +208,46 @@ class Federator:
 
         return model
 
+    def compress(self, vector, b=3000):
+        """
+        :param vector:
+        :param b: default: 7850, means not compress at all
+        :return:
+        """
+        stride = len(vector) // b
+        rest = len(vector) - stride*b
+        res = []
+        for i in range(0, stride*b, stride):
+            bin = vector[i:i+stride]
+            max_value = torch.max(bin)
+            min_value = torch.min(bin)
+            for j in bin:
+                if j == max_value or j == min_value:
+                    res.append(j)
+                    continue
+                p = ((j-min_value)/(max_value-min_value)).numpy()
+                indicator = np.random.choice(np.arange(0, 2), p=[p, 1-p])
+                if indicator == 0:
+                    res.append(max_value)
+                else:
+                    res.append(min_value)
+        if rest != 0:
+            bin = vector[-rest:]
+            max_value = torch.max(bin)
+            min_value = torch.min(bin)
+            for j in bin:
+                if j == max_value or j == min_value:
+                    res.append(j)
+                    continue
+                p = ((j-min_value)/(max_value-min_value)).numpy()
+                indicator = np.random.choice(np.arange(0, 2), p=[p, 1-p])
+                if indicator == 0:
+                    res.append(max_value)
+                else:
+                    res.append(min_value)
+        compressed = torch.Tensor(res)
+        return compressed
+
     def step(self, client_weights, new_weights=None):
         self.states = []
         if self.rule == 'trimmed' or self.rule == 'median':
@@ -226,6 +269,16 @@ class Federator:
                     self._improved_states[i] = torch.stack(self._improved_states[i])
         elif self.rule == 'krum':
             self.states = client_weights
+
+            # if using improved solution
+            if new_weights is not None:
+                self._improved_states = []
+                for params in new_weights:
+                    weight = params['linear.weight'].flatten()
+                    bias = params['linear.bias']
+                    flatten_params = torch.cat((weight, bias))
+                    self._improved_states.append(flatten_params)
+
         logging.info(f"round {self._epoch} state saved")
         self.attack()
         logging.info(f"round {self._epoch} attack finished")
@@ -244,11 +297,14 @@ class Federator:
                     weight = params['linear.weight'].flatten()
                     bias = params['linear.bias']
                     flatten_params = torch.cat((weight, bias))
+                    if self.compressed:
+                        flatten_params = self.compress(flatten_params)
                     self.flatten_states.append(flatten_params)
 
                 weight = self.model.state_dict()['linear.weight'].flatten()
                 bias = self.model.state_dict()['linear.bias']
                 self.flatten_global = torch.cat((weight, bias))
+
             return
 
         if self.rule == 'trimmed' or self.rule == 'median':
@@ -267,8 +323,16 @@ class Federator:
             for params in self.states:
                 weight = params['linear.weight'].flatten()
                 bias = params['linear.bias']
-                flatten_params = torch.cat((weight, bias))
+                flatten_params = torch.cat((weight, bias))  # torch.Size([7850])
+                # if self.compressed:
+                #     flatten_params = self.compress(flatten_params)
                 self.flatten_states.append(flatten_params)
+
+            if self.compressed:
+                for i in range(self.compromised):
+                    params = self.flatten_states[i]
+                    compressed_params = self.compress(params)
+                    self.flatten_states[i] = compressed_params
 
             weight = self.model.state_dict()['linear.weight'].flatten()
             bias = self.model.state_dict()['linear.bias']
@@ -282,7 +346,10 @@ class Federator:
                     self.compromised_states.append(res)
                 self.compromised_states = torch.cat(self.compromised_states, dim=0).reshape(-1, len(self.flatten_global))
             else:
-                self.first_compromised_model = self._attack(None, None)
+                if len(self._improved_states) > 0:
+                    self.first_compromised_model = self._attack(None, None, True)
+                else:
+                    self.first_compromised_model = self._attack(None, None)
                 self.compromised_states.append(self.first_compromised_model)
                 for i in range(1, len(self.flatten_states)):
                     if i <= self.compromised - 1:
@@ -322,7 +389,8 @@ class Federator:
 
     def krum(self, compromised_states, n=None):
         """
-        select the local model with the smallest sum of distance as global model
+            select the local model with the smallest sum of distance as global model
+
         :param compromised_states: states containing compromised states (variable length)
         :return: selected model
         """
@@ -349,7 +417,8 @@ class Federator:
 
     def krum_changing_direction(self, states):
         """
-        calculate changing direction vector
+            calculate changing direction vector
+
         :param states: received stated from workers (not compromised yet)
         :return: changing direction vector
         """
@@ -360,7 +429,8 @@ class Federator:
 
     def krum_lambda(self):
         '''
-        calculate the initial value of lambda, only do this at the beginning of each iteration
+            calculate the initial value of lambda, only do this at the beginning of each iteration
+
         :return: lambda_
         '''
 
@@ -433,7 +503,8 @@ class Federator:
 
     def krum_reverse_flatten_lr(self, params, input_dim=784, n_classes=10):
         """
-        reverse flatten model parameters to its original shape
+            reverse flatten model parameters to its original shape
+
         :param params: flatten parameters
         :param input_dim: 784
         :param n_classes: 10
@@ -483,7 +554,7 @@ class Federator:
         elif self.rule == 'krum':
             if full:
                 # 1. w_1' = w_Re - lambda * s
-                # 2. the other c-1 to be more close to w_1', distance at most epsilon (incomplete)
+                # 2. the other c-1 to be close to w_1'
                 s = self.krum_changing_direction(self.flatten_states)
                 w_Re = self.flatten_global
                 if not self.begin_searching_lambda:
@@ -492,7 +563,10 @@ class Federator:
                 compromised_w_1 = w_Re - self.lambda_ * s
                 return compromised_w_1
             else:
-                s = self.krum_changing_direction(self.flatten_states[:self.compromised])
+                if _improved_mean is not None:
+                    s = self.krum_changing_direction(self._improved_states)
+                else:
+                    s = self.krum_changing_direction(self.flatten_states[:self.compromised])
                 w_Re = self.flatten_global
                 if not self.begin_searching_lambda:
                     self.lambda_ = self.krum_lambda()
@@ -683,6 +757,23 @@ class Federator:
                     data = res[1].wait()
                     responses.append((client, _remote_method_async(Client.train_on_batch, client.ref,
                                                                    data=data)))
+                    res = responses[-1]
+                    epoch_data, weights = res[1].wait()
+                    new_weights.append(weights)
+            elif improve == 3:  # for different ratio
+                data = []
+                for i in range(self.compromised):
+                    client = selected_clients[i]
+                    responses.append((client, _remote_method_async(Client.get_cached_batch, client.ref)))
+                    res = responses[-1]
+                    inputs, labels = res[1].wait()
+                    length = int(self.improve_data_ratio * len(labels))
+                    indices = random.sample(range(len(labels)), length)
+                    data.extend(list(zip(inputs[indices], labels[indices])))
+                for i in range(self.compromised):
+                    client = selected_clients[i]
+                    responses.append((client, _remote_method_async(Client.train_on_batch, client.ref,
+                                                                   data=list(zip(*data)))))
                     res = responses[-1]
                     epoch_data, weights = res[1].wait()
                     new_weights.append(weights)

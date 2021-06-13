@@ -7,6 +7,8 @@ from fltk.nets import Cifar10CNN, FashionMNISTCNN, Cifar100ResNet, FashionMNISTR
 from fltk.datasets.non_iid_dataset.non_iid_mnist import NonIIDMNISTDataset
 from fltk.nets.mnist_lr import LRModel
 
+from fractions import Fraction
+
 # SEED = 1
 # torch.manual_seed(SEED)
 
@@ -90,6 +92,8 @@ class BareConfig:
         self.compromised_num = 0
         self.aggregation_rule = 'trimmed'
         self.improve = 0
+        self.improve_data_ratio = 1.0
+        self.compressed = False
 
     ###########
     # Methods #
@@ -157,6 +161,10 @@ class BareConfig:
                 self.aggregation_rule = cfg['attack']['aggregation_rule']
             if 'improve' in cfg['attack']:
                 self.improve = cfg['attack']['improve']
+            if 'improve_data_ratio' in cfg['attack']:
+                self.improve_data_ratio = float(Fraction(cfg['attack']['improve_data_ratio']))
+            if 'compressed' in cfg['attack']:
+                self.compressed = cfg['attack']['compressed']
 
         if 'batch_size' in cfg:
             self.batch_size = cfg['batch_size']

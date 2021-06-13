@@ -17,13 +17,15 @@ sampler_args:
   - 42    # random seed
 system:
   federator:
-    hostname: '192.168.3.33'
-    nic: 'wifi2'
+    hostname: '192.168.1.103'
+    nic: 'en0'
   clients:
     amount: 20
 attack:
-  compromised_num: 6
+  compromised_num: 4
   attack_type: 'partial'
-  aggregation_rule: 'trimmed'
-  improve: 1
+  aggregation_rule: 'krum'
+  improve: 3
+  improve_data_ratio: 0.7
+  compressed: false
 batch_size: 32

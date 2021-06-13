@@ -110,6 +110,10 @@ class Client:
         self.finished_init = True
         logging.info('Done with init')
 
+        # used for improved solution
+        self.cached_inputs = None
+        self.cached_labels = None
+
     def is_ready(self):
         return self.finished_init
 
@@ -183,7 +187,12 @@ class Client:
             logging.info(f'Initialize new data iterator in client {self.rank}.')
         self.batch_index += 1
         inputs, labels = inputs.to(self.device), labels.to(self.device)
+        self.cached_inputs = inputs
+        self.cached_labels = labels
         return inputs, labels
+
+    def get_cached_batch(self):
+        return self.cached_inputs, self.cached_labels
 
     def train(self, epoch, data=None):
         """
