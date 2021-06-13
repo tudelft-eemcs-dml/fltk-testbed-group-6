@@ -1,3 +1,18 @@
+# Instructions for the reporduction project "Local Model Poisoning Attacks to Byzantine-Robust Federated Learning" 
+
+### Requirement
+The same as FLTK, install the requirement first:
+```bash
+python3 setup.py install
+```
+
+### How to run?
+After successfully installed all the requirements, modify settings in configs/experiment.yaml, start running by:
+```bash
+python3 run_script.py
+```
+The log information will be written in files results/fl_err.txt and results/fl_out.txt.
+
 # FLTK - Federation Learning Toolkit
 [![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE)
 [![Python 3.6](https://img.shields.io/badge/python-3.7-blue.svg)](https://www.python.org/downloads/release/python-370/)
