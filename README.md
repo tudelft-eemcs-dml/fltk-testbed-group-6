@@ -1,4 +1,4 @@
-# Instructions for the reporduction project "Local Model Poisoning Attacks to Byzantine-Robust Federated Learning" 
+# Instructions for the reproduction project "Local Model Poisoning Attacks to Byzantine-Robust Federated Learning" 
 
 ### Requirement
 The same as FLTK, install the requirement first:
@@ -7,7 +7,7 @@ python3 setup.py install
 ```
 
 ### How to run?
-After successfully installed all the requirements, modify settings in configs/experiment.yaml, start running by:
+After successfully installed all the requirements, modify settings in configs/experiment.yaml if necessary, start running by:
 ```bash
 python3 run_script.py
 ```
